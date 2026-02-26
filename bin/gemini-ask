@@ -1,0 +1,117 @@
+#!/bin/bash
+# gemini-ask: Gemini CLI wrapper with topic-based session management
+#
+# Usage:
+#   gemini-ask "프롬프트"                       - 자동으로 latest 세션 resume
+#   gemini-ask --topic "코드리뷰" "프롬프트"    - 주제별 세션 찾아서 resume
+#   gemini-ask --new "프롬프트"                 - 새 세션 시작
+#   gemini-ask --session <id> "프롬프트"        - 특정 세션 resume
+#   gemini-ask --list                           - 세션 목록
+#   echo "code" | gemini-ask "리뷰해줘"         - stdin pipe 지원
+
+set -euo pipefail
+
+FORCE_NEW=false
+TOPIC=""
+SESSION_ID=""
+
+# Parse flags
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --new)
+            FORCE_NEW=true
+            shift
+            ;;
+        --topic)
+            TOPIC="$2"
+            shift 2
+            ;;
+        --session)
+            SESSION_ID="$2"
+            shift 2
+            ;;
+        --list)
+            gemini --list-sessions 2>/dev/null
+            exit 0
+            ;;
+        *)
+            echo "Unknown flag: $1" >&2
+            shift
+            ;;
+    esac
+done
+
+PROMPT="${1:-}"
+if [ -z "$PROMPT" ]; then
+    echo "Usage: gemini-ask [--new|--topic TOPIC|--session ID] \"프롬프트\"" >&2
+    exit 1
+fi
+
+# Determine which session to resume
+RESUME_ARG=""
+
+if [ "$FORCE_NEW" = true ]; then
+    RESUME_ARG=""
+elif [ -n "$SESSION_ID" ]; then
+    RESUME_ARG="--resume $SESSION_ID"
+elif [ -n "$TOPIC" ]; then
+    # Parse `gemini --list-sessions` to find topic-matching session
+    SESSION_LIST=$(gemini --list-sessions 2>/dev/null || true)
+
+    MATCHED_ID=$(echo "$SESSION_LIST" | python3 -c "
+import sys, re
+
+topic = '''$TOPIC'''.strip().lower()
+if not topic:
+    sys.exit(0)
+
+best_id = ''
+# Parse lines like: '  2. 코드 리뷰 요청 (7 minutes ago) [uuid]'
+for line in sys.stdin:
+    m = re.match(r'\s*\d+\.\s+(.+?)\s+\(.*?\)\s+\[([0-9a-f-]+)\]', line.strip())
+    if m:
+        summary = m.group(1).strip().lower()
+        uuid = m.group(2)
+        # Skip empty/placeholder summaries
+        if not summary or summary.replace(',','').replace('.','').strip() == '':
+            continue
+        # Check if topic keywords appear in summary or vice versa
+        if topic in summary or summary in topic:
+            best_id = uuid
+        else:
+            # Fuzzy: check if any word from topic appears in summary
+            topic_words = [w for w in topic.split() if len(w) > 1]
+            if topic_words and any(w in summary for w in topic_words):
+                best_id = uuid
+
+print(best_id)
+" 2>/dev/null)
+
+    if [ -n "$MATCHED_ID" ]; then
+        RESUME_ARG="--resume $MATCHED_ID"
+    else
+        # No matching topic found — start new session
+        RESUME_ARG=""
+    fi
+else
+    # Default: resume latest if exists
+    SESSION_LIST=$(gemini --list-sessions 2>/dev/null || true)
+    if echo "$SESSION_LIST" | grep -q "Available sessions"; then
+        RESUME_ARG="--resume latest"
+    fi
+fi
+
+# Execute
+if [ -n "$RESUME_ARG" ]; then
+    if [ -t 0 ]; then
+        gemini $RESUME_ARG -p "$PROMPT" -o text 2>/dev/null
+    else
+        cat | gemini $RESUME_ARG -p "$PROMPT" -o text 2>/dev/null
+    fi
+else
+    if [ -t 0 ]; then
+        gemini -p "$PROMPT" -o text 2>/dev/null
+    else
+        cat | gemini -p "$PROMPT" -o text 2>/dev/null
+    fi
+fi
