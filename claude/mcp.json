@@ -7,6 +7,24 @@
     "sequential-thinking": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "arxiv-latex": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "~/.local/share/mcp/arxiv-latex-mcp",
+        "run",
+        "server/main.py"
+      ]
+    },
+    "academic-search": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "~/.local/share/mcp/academic-search-mcp",
+        "run",
+        "server.py"
+      ]
     }
   }
 }

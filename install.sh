@@ -56,6 +56,33 @@ done
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 chmod +x ~/.local/bin/gemini-ask
 
+# Install uv (Python package manager for MCP servers)
+if ! command -v uv &>/dev/null; then
+  echo "Installing uv..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null || echo "WARNING: uv install failed"
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# Install MCP servers
+MCP_DIR="$HOME/.local/share/mcp"
+mkdir -p "$MCP_DIR"
+
+for mcp_repo in \
+  "takashiishida/arxiv-latex-mcp" \
+  "afrise/academic-search-mcp-server:academic-search-mcp"; do
+  # Parse repo:dirname format
+  REPO_URL="${mcp_repo%%:*}"
+  DIR_NAME="${mcp_repo##*:}"
+  [ "$DIR_NAME" = "$REPO_URL" ] && DIR_NAME="$(basename "$REPO_URL")"
+
+  if [ ! -d "$MCP_DIR/$DIR_NAME" ]; then
+    echo "Installing MCP: $DIR_NAME..."
+    git clone "https://github.com/$REPO_URL.git" "$MCP_DIR/$DIR_NAME" 2>/dev/null && \
+    (cd "$MCP_DIR/$DIR_NAME" && uv sync 2>/dev/null) || \
+    echo "WARNING: $DIR_NAME install failed"
+  fi
+done
+
 # Install Claude Squad (if not already installed)
 if ! command -v cs &>/dev/null; then
   echo "Installing Claude Squad..."
@@ -79,6 +106,10 @@ echo "  ~/.local/bin/gemini-ask -> $DOTFILES_DIR/bin/gemini-ask"
 echo ""
 echo "Tools: cs (Claude Squad), npx ccusage (usage tracking)"
 echo ""
-echo "Optional: install oh-my-claudecode plugin inside Claude Code:"
-echo "  /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode"
-echo "  /plugin install oh-my-claudecode"
+echo "Optional plugins (run inside Claude Code):"
+echo "  oh-my-claudecode:"
+echo "    /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode"
+echo "    /plugin install oh-my-claudecode"
+echo "  claude-scientific-writer:"
+echo "    /plugin marketplace add https://github.com/K-Dense-AI/claude-scientific-writer"
+echo "    /plugin install claude-scientific-writer"
