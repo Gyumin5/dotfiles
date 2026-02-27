@@ -8,10 +8,16 @@ set -euo pipefail
 REPO="https://github.com/Gyumin5/dotfiles.git"
 DOTFILES_DIR="$HOME/dotfiles"
 
-# Resolve real path of this script (handles symlinks)
+# Resolve real path of this script (handles symlinks, works on macOS+Linux)
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+  SOURCE="${BASH_SOURCE[0]}"
+  while [ -L "$SOURCE" ]; do
+    DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+  done
+  SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
 fi
 
 # Detect if run from local clone or via curl|bash

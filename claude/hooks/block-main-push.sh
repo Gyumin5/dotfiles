@@ -7,7 +7,7 @@ if echo "$COMMAND" | grep -q 'git push'; then
   CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
   # Block if: on main/master, OR command explicitly targets main/master
   if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ] || \
-     echo "$COMMAND" | grep -qE 'git push\s+\S+\s+(main|master)(\s|$)'; then
+     echo "$COMMAND" | grep -qE 'git push\s+\S+\s+.*(main|master)(\s|$)'; then
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PreToolUse",

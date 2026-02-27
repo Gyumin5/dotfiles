@@ -14,10 +14,10 @@ if echo "$COMMAND" | grep -qE '\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+|.*-r\s.*-f|.*-
 elif echo "$COMMAND" | grep -qE '(^|\s|/)(sudo)\s'; then
   DANGEROUS=true
   REASON="sudo 명령"
-# chmod 777 (including -R flag)
-elif echo "$COMMAND" | grep -qE '\bchmod\s+(-[a-zA-Z]*\s+)*777'; then
+# chmod 777 / a+rwx (including -R flag, numeric and symbolic)
+elif echo "$COMMAND" | grep -qE '\bchmod\s+(-[a-zA-Z]*\s+)*(777|0777|a\+rwx|a=rwx)'; then
   DANGEROUS=true
-  REASON="chmod 777"
+  REASON="chmod 777 / a+rwx"
 # chown (ownership change)
 elif echo "$COMMAND" | grep -qE '(^|\s|/)chown\s'; then
   DANGEROUS=true
