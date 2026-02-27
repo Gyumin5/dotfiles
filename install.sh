@@ -1,8 +1,25 @@
 #!/bin/bash
-# dotfiles installer - symlink config files to their expected locations
+# dotfiles installer
+# Usage:
+#   Local:  ~/dotfiles/install.sh
+#   Remote: curl -fsSL https://raw.githubusercontent.com/Gyumin5/dotfiles/master/install.sh | bash
 set -euo pipefail
 
-DOTFILES_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO="https://github.com/Gyumin5/dotfiles.git"
+DOTFILES_DIR="$HOME/dotfiles"
+
+# If not run from local clone, clone first
+if [ ! -f "$(dirname "$0")/claude/settings.json" ] 2>/dev/null; then
+  echo "Cloning dotfiles..."
+  if [ -d "$DOTFILES_DIR" ]; then
+    echo "Updating existing dotfiles..."
+    git -C "$DOTFILES_DIR" pull --ff-only
+  else
+    git clone "$REPO" "$DOTFILES_DIR"
+  fi
+else
+  DOTFILES_DIR="$(cd "$(dirname "$0")" && pwd)"
+fi
 
 mkdir -p ~/.claude/hooks ~/.local/bin
 
@@ -20,6 +37,7 @@ done
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 chmod +x ~/.local/bin/gemini-ask
 
+echo ""
 echo "Dotfiles installed successfully!"
 echo "  ~/.claude/CLAUDE.md -> $DOTFILES_DIR/claude/CLAUDE.md"
 echo "  ~/.claude/settings.json -> $DOTFILES_DIR/claude/settings.json"
