@@ -69,6 +69,34 @@
       "WebFetch",
       "WebSearch",
       "NotebookEdit"
+    ],
+    "deny": [
+      "Read(**/.env*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/.ssh/**)",
+      "Read(**/.aws/**)",
+      "Read(**/credentials*)",
+      "Write(**/.env*)",
+      "Write(**/*.pem)",
+      "Write(**/*.key)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/block-dangerous.sh"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/block-main-push.sh"
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {
