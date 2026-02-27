@@ -29,6 +29,10 @@
     "gemini-cli": {
       "command": "npx",
       "args": ["-y", "gemini-mcp-tool"]
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
     }
   }
 }
