@@ -56,6 +56,12 @@ done
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 chmod +x ~/.local/bin/gemini-ask
 
+# Install Claude Squad (if not already installed)
+if ! command -v cs &>/dev/null; then
+  echo "Installing Claude Squad..."
+  curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.sh | bash 2>/dev/null || echo "WARNING: Claude Squad install failed (needs internet)"
+fi
+
 # Check PATH
 if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
   echo ""
@@ -70,3 +76,9 @@ echo "  ~/.claude/settings.json -> $DOTFILES_DIR/claude/settings.json"
 echo "  ~/.claude/mcp.json -> $DOTFILES_DIR/claude/mcp.json"
 echo "  ~/.claude/hooks/ -> $DOTFILES_DIR/claude/hooks/"
 echo "  ~/.local/bin/gemini-ask -> $DOTFILES_DIR/bin/gemini-ask"
+echo ""
+echo "Tools: cs (Claude Squad), npx ccusage (usage tracking)"
+echo ""
+echo "Optional: install oh-my-claudecode plugin inside Claude Code:"
+echo "  /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode"
+echo "  /plugin install oh-my-claudecode"
