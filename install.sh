@@ -8,8 +8,16 @@ set -euo pipefail
 REPO="https://github.com/Gyumin5/dotfiles.git"
 DOTFILES_DIR="$HOME/dotfiles"
 
-# If not run from local clone, clone first
-if [ ! -f "$(dirname "$0")/claude/settings.json" ] 2>/dev/null; then
+# Resolve real path of this script (handles symlinks)
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+fi
+
+# Detect if run from local clone or via curl|bash
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/claude/settings.json" ]; then
+  DOTFILES_DIR="$SCRIPT_DIR"
+else
   echo "Cloning dotfiles..."
   if [ -d "$DOTFILES_DIR" ]; then
     echo "Updating existing dotfiles..."
@@ -17,9 +25,14 @@ if [ ! -f "$(dirname "$0")/claude/settings.json" ] 2>/dev/null; then
   else
     git clone "$REPO" "$DOTFILES_DIR"
   fi
-else
-  DOTFILES_DIR="$(cd "$(dirname "$0")" && pwd)"
 fi
+
+# Check dependencies
+for cmd in jq git; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "WARNING: '$cmd' is not installed. Some features may not work."
+  fi
+done
 
 mkdir -p ~/.claude/hooks ~/.local/bin
 
@@ -36,6 +49,13 @@ done
 # Custom scripts
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 chmod +x ~/.local/bin/gemini-ask
+
+# Check PATH
+if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
+  echo ""
+  echo "WARNING: ~/.local/bin is not in your PATH."
+  echo "  Add this to your shell rc file: export PATH=\"\$HOME/.local/bin:\$PATH\""
+fi
 
 echo ""
 echo "Dotfiles installed successfully!"
