@@ -56,6 +56,19 @@ done
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 chmod +x ~/.local/bin/gemini-ask
 
+# Install Claude Code
+if ! command -v claude &>/dev/null; then
+  if command -v npm &>/dev/null; then
+    echo "Installing Claude Code..."
+    npm install -g @anthropic-ai/claude-code 2>/dev/null || echo "WARNING: Claude Code install failed"
+  elif command -v node &>/dev/null; then
+    echo "Installing Claude Code (via corepack/npx)..."
+    npx -y @anthropic-ai/claude-code --version 2>/dev/null || echo "WARNING: Claude Code install failed"
+  else
+    echo "WARNING: Node.js not found. Install Node.js first, then run: npm install -g @anthropic-ai/claude-code"
+  fi
+fi
+
 # Install uv (Python package manager for MCP servers)
 if ! command -v uv &>/dev/null; then
   echo "Installing uv..."
@@ -124,3 +137,9 @@ echo "  ~/.local/bin/gemini-ask -> $DOTFILES_DIR/bin/gemini-ask"
 echo ""
 echo "Tools: cs (Claude Squad), npx ccusage (usage tracking)"
 echo "Plugins: oh-my-claudecode, claude-scientific-writer"
+echo ""
+if ! claude --version &>/dev/null 2>&1; then
+  echo "Next step: Install Node.js, then re-run this script"
+else
+  echo "Next step: claude login"
+fi
