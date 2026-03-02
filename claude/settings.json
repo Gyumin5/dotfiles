@@ -11,6 +11,7 @@
       "WebSearch",
       "NotebookEdit"
     ],
+    "additionalDirectories": ["/home/gmoh"],
     "deny": [
       "Read(**/.env*)",
       "Read(**/*.pem)",
