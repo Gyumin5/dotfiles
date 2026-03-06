@@ -140,11 +140,20 @@ if [ -n "$STDIN_DATA" ]; then
 $PROMPT"
 fi
 
+# Run codex exec: extract only the response between "codex" and "tokens used"
+run_codex() {
+    codex exec --full-auto --skip-git-repo-check "$@" 2>&1 | awk '
+        /^codex$/ { capture=1; next }
+        /^tokens used$/ { capture=0; next }
+        capture { print }
+    '
+}
+
 # Determine session handling
 if [ "$FORCE_NEW" = true ]; then
-    codex exec --full-auto --skip-git-repo-check "$PROMPT" 2>/dev/null
+    run_codex "$PROMPT"
 elif [ -n "$SESSION_ID" ]; then
-    codex exec --full-auto --skip-git-repo-check resume "$SESSION_ID" "$PROMPT" 2>/dev/null
+    run_codex resume "$SESSION_ID" "$PROMPT"
 elif [ -n "$TOPIC" ]; then
     MATCHED_ID=""
     if [ -d "$SESSIONS_DIR" ]; then
@@ -157,9 +166,9 @@ elif [ -n "$TOPIC" ]; then
     fi
 
     if [ -n "$MATCHED_ID" ]; then
-        codex exec --full-auto --skip-git-repo-check resume "$MATCHED_ID" "$PROMPT" 2>/dev/null
+        run_codex resume "$MATCHED_ID" "$PROMPT"
     else
-        codex exec --full-auto --skip-git-repo-check "$PROMPT" 2>/dev/null
+        run_codex "$PROMPT"
     fi
 else
     # Default: resume latest session matching current cwd
@@ -171,8 +180,8 @@ else
     fi
 
     if [ -n "$LATEST_ID" ]; then
-        codex exec --full-auto --skip-git-repo-check resume "$LATEST_ID" "$PROMPT" 2>/dev/null
+        run_codex resume "$LATEST_ID" "$PROMPT"
     else
-        codex exec --full-auto --skip-git-repo-check "$PROMPT" 2>/dev/null
+        run_codex "$PROMPT"
     fi
 fi
