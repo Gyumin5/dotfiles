@@ -63,7 +63,7 @@ cat file.py | gemini-ask --topic "코드리뷰" "이 코드를 리뷰해줘"
 5. 필요시 후속 작업 수행
 
 ### 주의사항
-- gemini-ask의 timeout은 충분히 길게 설정한다 (최소 30초)
+- **gemini-ask 호출 시 Bash tool의 timeout을 무조건 600000ms (10분)으로 설정한다**
 - 긴 코드는 stdin으로 pipe하여 전달한다
 - Gemini 응답이 잘린 것 같으면 사용자에게 알린다
 - 주제 판단이 애매하면 사용자에게 어떤 세션을 쓸지 물어본다
@@ -116,12 +116,9 @@ cat file.py | codex-ask --topic "코드리뷰" "이 코드를 리뷰해줘"
 - `codex mcp-server`로 실행되며, Codex의 코드 실행/분석 기능 사용 가능
 
 ### 주의사항 (필수 - 반드시 지킬 것)
-- **codex-ask 호출 시 Bash tool의 timeout 파라미터를 반드시 설정해야 한다:**
-  - 일반 호출: `timeout: 300000` (5분)
-  - `--deep` 호출: `timeout: 600000` (10분)
-  - 기본 timeout(120초)으로는 codex 응답이 중간에 잘린다
+- **codex-ask, gemini-ask 호출 시 Bash tool의 timeout을 무조건 600000ms (10분)으로 설정한다**
+- `--deep` 사용 시 timeout을 600000ms (10분)으로 설정한다
 - "깊게 생각해", "deep think", "자세히 분석해" 등의 요청 시 `codex-ask --deep`으로 호출한다
-- **gemini-ask 호출 시에도 Bash tool timeout을 120000ms 이상으로 설정한다**
 - 긴 코드는 stdin으로 pipe하여 전달한다
 - Codex 응답이 잘린 것 같으면 사용자에게 알린다
 - 주제 판단이 애매하면 사용자에게 어떤 세션을 쓸지 물어본다
