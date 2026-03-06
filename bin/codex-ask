@@ -8,6 +8,7 @@
 #   codex-ask --session <id> "프롬프트"        - 특정 세션 resume
 #   codex-ask --list                           - 세션 목록 (현재 디렉토리 기준)
 #   codex-ask --all --list                     - 전체 세션 목록
+#   codex-ask --deep --new "프롬프트"          - xhigh reasoning (깊게 생각)
 #   echo "code" | codex-ask "리뷰해줘"         - stdin pipe 지원
 
 set -uo pipefail
@@ -18,6 +19,7 @@ TOPIC=""
 SESSION_ID=""
 LIST_ONLY=false
 SHOW_ALL=false
+DEEP=false
 CUR_DIR="$(pwd)"
 
 # Parse flags
@@ -41,6 +43,10 @@ while [[ "${1:-}" == --* ]]; do
             ;;
         --all)
             SHOW_ALL=true
+            shift
+            ;;
+        --deep)
+            DEEP=true
             shift
             ;;
         *)
@@ -142,7 +148,11 @@ fi
 
 # Run codex exec: extract only the response between "codex" and "tokens used"
 run_codex() {
-    codex exec --full-auto --skip-git-repo-check "$@" 2>&1 | awk '
+    local effort_flag=""
+    if [ "$DEEP" = true ]; then
+        effort_flag='-c model_reasoning_effort="xhigh"'
+    fi
+    eval codex exec --full-auto --skip-git-repo-check $effort_flag '"$@"' 2>&1 | awk '
         /^codex$/ { capture=1; next }
         /^tokens used$/ { capture=0; next }
         capture { print }

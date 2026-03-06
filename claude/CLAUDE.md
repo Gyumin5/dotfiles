@@ -116,7 +116,10 @@ cat file.py | codex-ask --topic "코드리뷰" "이 코드를 리뷰해줘"
 - `codex mcp-server`로 실행되며, Codex의 코드 실행/분석 기능 사용 가능
 
 ### 주의사항
-- codex-ask의 timeout은 충분히 길게 설정한다 (최소 60초)
+- **Bash timeout을 반드시 300000ms (5분)으로 설정**한다. codex는 reasoning에 시간이 걸리므로 기본 2분으로는 부족하다
+- `--deep` 사용 시 timeout을 600000ms (10분)으로 설정한다
+- "깊게 생각해", "deep think", "자세히 분석해" 등의 요청 시 `codex-ask --deep`으로 호출한다
+- gemini-ask도 동일하게 timeout 120000ms 이상으로 설정한다
 - 긴 코드는 stdin으로 pipe하여 전달한다
 - Codex 응답이 잘린 것 같으면 사용자에게 알린다
 - 주제 판단이 애매하면 사용자에게 어떤 세션을 쓸지 물어본다
