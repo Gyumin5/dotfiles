@@ -33,6 +33,10 @@
     "memory": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "codex-cli": {
+      "command": "/home/gmoh/.nvm/versions/node/v22.17.0/bin/codex",
+      "args": ["mcp-server"]
     }
   }
 }

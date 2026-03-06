@@ -1,0 +1,178 @@
+#!/bin/bash
+# codex-ask: Codex CLI wrapper with topic-based session management
+#
+# Usage:
+#   codex-ask "프롬프트"                       - 최근 세션 resume (현재 디렉토리 기준)
+#   codex-ask --topic "코드리뷰" "프롬프트"    - 주제별 세션 찾아서 resume
+#   codex-ask --new "프롬프트"                 - 새 세션 시작
+#   codex-ask --session <id> "프롬프트"        - 특정 세션 resume
+#   codex-ask --list                           - 세션 목록 (현재 디렉토리 기준)
+#   codex-ask --all --list                     - 전체 세션 목록
+#   echo "code" | codex-ask "리뷰해줘"         - stdin pipe 지원
+
+set -uo pipefail
+
+SESSIONS_DIR="$HOME/.codex/sessions"
+FORCE_NEW=false
+TOPIC=""
+SESSION_ID=""
+LIST_ONLY=false
+SHOW_ALL=false
+CUR_DIR="$(pwd)"
+
+# Parse flags
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --new)
+            FORCE_NEW=true
+            shift
+            ;;
+        --topic)
+            TOPIC="$2"
+            shift 2
+            ;;
+        --session)
+            SESSION_ID="$2"
+            shift 2
+            ;;
+        --list)
+            LIST_ONLY=true
+            shift
+            ;;
+        --all)
+            SHOW_ALL=true
+            shift
+            ;;
+        *)
+            echo "Unknown flag: $1" >&2
+            shift
+            ;;
+    esac
+done
+
+# Helper: extract cwd from session file
+get_session_cwd() {
+    grep -m1 'session_meta\|"cwd"' "$1" 2>/dev/null | python3 -c "
+import sys,json
+try:
+    d=json.loads(sys.stdin.readline())
+    p=d.get('payload',d)
+    print(p.get('cwd',''))
+except: print('')
+" 2>/dev/null
+}
+
+# Helper: filter sessions by cwd (returns matching file paths)
+filter_sessions() {
+    while read -r f; do
+        if [ "$SHOW_ALL" = true ]; then
+            echo "$f"
+        else
+            scwd=$(get_session_cwd "$f")
+            # Match if session cwd starts with current dir or vice versa, or if empty
+            if [ -z "$scwd" ] || [ "$scwd" = "$CUR_DIR" ] || [[ "$scwd" == "$CUR_DIR"/* ]] || [[ "$CUR_DIR" == "$scwd"/* ]]; then
+                echo "$f"
+            fi
+        fi
+    done
+}
+
+# --list: scan session files and show summary
+if [ "$LIST_ONLY" = true ]; then
+    if [ ! -d "$SESSIONS_DIR" ]; then
+        echo "No sessions found."
+        exit 0
+    fi
+    if [ "$SHOW_ALL" = true ]; then
+        echo "  [전체 세션]"
+    else
+        echo "  [$(basename "$CUR_DIR") 세션] (--all 로 전체 보기)"
+    fi
+    echo ""
+    find "$SESSIONS_DIR" -name '*.jsonl' -type f | sort -r | head -50 | filter_sessions | head -20 | while read -r f; do
+        sid=$(basename "$f" .jsonl | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+        date_part=$(basename "$f" .jsonl | grep -oP '\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}' | tr 'T' ' ' | tr '-' ':' | sed 's/\(.....\):\(..\):\(..\)/\1-\2-\3/')
+        scwd=$(get_session_cwd "$f")
+        summary=$(grep '"role":"user"' "$f" 2>/dev/null | python3 -c "
+import sys, json
+for line in sys.stdin:
+    try:
+        d = json.loads(line.strip())
+        obj = d.get('payload', d)
+        for c in obj.get('content', []):
+            if c.get('type') == 'input_text':
+                t = c['text'].strip()
+                if t.startswith('<') or t.startswith('#') or 'permissions' in t[:50].lower():
+                    continue
+                t = t[:60].replace('\n', ' ')
+                print(t)
+                raise StopIteration
+    except StopIteration: break
+    except: pass
+" 2>/dev/null)
+        [ -z "$summary" ] && summary="(no summary)"
+        if [ "$SHOW_ALL" = true ] && [ -n "$scwd" ]; then
+            echo "  [$sid] $date_part | $(basename "$scwd")/ | $summary"
+        else
+            echo "  [$sid] $date_part | $summary"
+        fi
+    done
+    exit 0
+fi
+
+PROMPT="${1:-}"
+if [ -z "$PROMPT" ]; then
+    echo "Usage: codex-ask [--new|--topic TOPIC|--session ID|--all] \"프롬프트\"" >&2
+    exit 1
+fi
+
+# Read stdin if piped
+STDIN_DATA=""
+if [ ! -t 0 ]; then
+    STDIN_DATA=$(cat)
+fi
+
+# Prepend stdin to prompt if available
+if [ -n "$STDIN_DATA" ]; then
+    PROMPT="$STDIN_DATA
+
+---
+$PROMPT"
+fi
+
+# Determine session handling
+if [ "$FORCE_NEW" = true ]; then
+    codex exec --full-auto --skip-git-repo-check "$PROMPT" 2>/dev/null
+elif [ -n "$SESSION_ID" ]; then
+    codex exec --full-auto --skip-git-repo-check resume "$SESSION_ID" "$PROMPT" 2>/dev/null
+elif [ -n "$TOPIC" ]; then
+    MATCHED_ID=""
+    if [ -d "$SESSIONS_DIR" ]; then
+        MATCHED_ID=$(find "$SESSIONS_DIR" -name '*.jsonl' -type f | sort -r | head -50 | filter_sessions | head -30 | while read -r f; do
+            if grep -q '"role":"user"' "$f" 2>/dev/null && grep '"role":"user"' "$f" 2>/dev/null | grep -qi "$TOPIC"; then
+                basename "$f" .jsonl | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+                break
+            fi
+        done)
+    fi
+
+    if [ -n "$MATCHED_ID" ]; then
+        codex exec --full-auto --skip-git-repo-check resume "$MATCHED_ID" "$PROMPT" 2>/dev/null
+    else
+        codex exec --full-auto --skip-git-repo-check "$PROMPT" 2>/dev/null
+    fi
+else
+    # Default: resume latest session matching current cwd
+    LATEST_ID=""
+    if [ -d "$SESSIONS_DIR" ]; then
+        LATEST_ID=$(find "$SESSIONS_DIR" -name '*.jsonl' -type f | sort -r | head -50 | filter_sessions | head -1 | while read -r f; do
+            basename "$f" .jsonl | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        done)
+    fi
+
+    if [ -n "$LATEST_ID" ]; then
+        codex exec --full-auto --skip-git-repo-check resume "$LATEST_ID" "$PROMPT" 2>/dev/null
+    else
+        codex exec --full-auto --skip-git-repo-check "$PROMPT" 2>/dev/null
+    fi
+fi
