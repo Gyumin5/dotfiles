@@ -152,7 +152,7 @@ run_codex() {
     if [ "$DEEP" = true ]; then
         effort_flag='-c model_reasoning_effort="xhigh"'
     fi
-    eval codex exec --full-auto --skip-git-repo-check $effort_flag '"$@"' 2>&1 | awk '
+    eval codex exec --skip-git-repo-check $effort_flag '"$@"' 2>&1 | awk '
         /^codex$/ { capture=1; next }
         /^tokens used$/ { capture=0; next }
         capture { print }
