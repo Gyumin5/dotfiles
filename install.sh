@@ -118,16 +118,12 @@ fi
 if command -v claude &>/dev/null; then
   echo "Installing Claude Code plugins..."
   # Add plugin marketplaces
-  claude plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode 2>/dev/null || true
   claude plugin marketplace add https://github.com/K-Dense-AI/claude-scientific-writer 2>/dev/null || true
   # Install plugins
-  claude plugin install oh-my-claudecode 2>/dev/null || echo "WARNING: oh-my-claudecode install failed"
   claude plugin install claude-scientific-writer 2>/dev/null || echo "WARNING: claude-scientific-writer install failed"
 else
   echo ""
   echo "NOTE: Claude Code CLI not found. Install plugins manually after installing Claude Code:"
-  echo "  /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode"
-  echo "  /plugin install oh-my-claudecode"
   echo "  /plugin marketplace add https://github.com/K-Dense-AI/claude-scientific-writer"
   echo "  /plugin install claude-scientific-writer"
 fi
@@ -149,7 +145,7 @@ echo "  ~/.claude/skills/ -> $DOTFILES_DIR/claude/skills/"
 echo "  ~/.local/bin/gemini-ask -> $DOTFILES_DIR/bin/gemini-ask"
 echo ""
 echo "Tools: cs (Claude Squad), npx ccusage (usage tracking)"
-echo "Plugins: oh-my-claudecode, claude-scientific-writer"
+echo "Plugins: claude-scientific-writer"
 echo ""
 if ! claude --version &>/dev/null 2>&1; then
   echo "Next step: Install Node.js, then re-run this script"
