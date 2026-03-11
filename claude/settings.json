@@ -9,17 +9,7 @@
       "Grep",
       "WebFetch",
       "WebSearch",
-      "NotebookEdit",
-      "Bash(python3:*)",
-      "Bash(pdflatex:*)",
-      "Bash(bibtex:*)",
-      "Bash(kpsewhich:*)",
-      "Bash(catkin_make:*)",
-      "Bash(source:*)",
-      "Bash(chmod:*)",
-      "Bash(gemini-ask:*)",
-      "Bash(~/.local/bin/gemini-ask:*)",
-      "Bash(curl:*)"
+      "NotebookEdit"
     ],
     "deny": [
       "Read(**/.env*)",
