@@ -52,6 +52,18 @@ for hook in "$DOTFILES_DIR"/claude/hooks/*.sh; do
   ln -sf "$hook" ~/.claude/hooks/"$(basename "$hook")"
 done
 
+# Claude skills
+if [ -d "$DOTFILES_DIR/claude/skills" ]; then
+  # Remove existing skills dir if not a symlink, then symlink each skill
+  for skill_dir in "$DOTFILES_DIR"/claude/skills/*/; do
+    skill_name="$(basename "$skill_dir")"
+    mkdir -p ~/.claude/skills/"$skill_name"
+    for f in "$skill_dir"*; do
+      ln -sf "$f" ~/.claude/skills/"$skill_name/$(basename "$f")"
+    done
+  done
+fi
+
 # Custom scripts
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 chmod +x ~/.local/bin/gemini-ask
@@ -133,6 +145,7 @@ echo "  ~/.claude/CLAUDE.md -> $DOTFILES_DIR/claude/CLAUDE.md"
 echo "  ~/.claude/settings.json -> $DOTFILES_DIR/claude/settings.json"
 echo "  ~/.claude/mcp.json -> $DOTFILES_DIR/claude/mcp.json"
 echo "  ~/.claude/hooks/ -> $DOTFILES_DIR/claude/hooks/"
+echo "  ~/.claude/skills/ -> $DOTFILES_DIR/claude/skills/"
 echo "  ~/.local/bin/gemini-ask -> $DOTFILES_DIR/bin/gemini-ask"
 echo ""
 echo "Tools: cs (Claude Squad), npx ccusage (usage tracking)"
