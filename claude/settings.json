@@ -9,7 +9,17 @@
       "Grep",
       "WebFetch",
       "WebSearch",
-      "NotebookEdit"
+      "NotebookEdit",
+      "Bash(python3:*)",
+      "Bash(pdflatex:*)",
+      "Bash(bibtex:*)",
+      "Bash(kpsewhich:*)",
+      "Bash(catkin_make:*)",
+      "Bash(source:*)",
+      "Bash(chmod:*)",
+      "Bash(gemini-ask:*)",
+      "Bash(~/.local/bin/gemini-ask:*)",
+      "Bash(curl:*)"
     ],
     "deny": [
       "Read(**/.env*)",
@@ -52,9 +62,7 @@
       "Write(**/*_history)",
       "Edit(**/*_history)"
     ],
-    "additionalDirectories": [
-      "~"
-    ]
+    "additionalDirectories": ["~"]
   },
   "hooks": {
     "PreToolUse": [
@@ -97,7 +105,16 @@
   "enabledPlugins": {
     "pyright-lsp@claude-plugins-official": true,
     "claude-scientific-writer@claude-scientific-writer": true,
-    "typescript-lsp@claude-plugins-official": true
+    "typescript-lsp@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-scientific-writer": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/K-Dense-AI/claude-scientific-writer.git"
+      }
+    }
   },
   "effortLevel": "high"
 }
