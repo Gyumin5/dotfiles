@@ -14,10 +14,9 @@ disable-model-invocation: false
 
 ### 일반 질문
 
-1. **Claude가 먼저 자신의 의견을 정리**한다 (Gemini/Codex 응답을 기다리지 않고)
-2. 동일한 프롬프트를 `gemini-ask`와 `codex-ask`에 **Bash tool 병렬 호출**로 전달
-3. **Bash timeout 600000ms (10분)** 필수
-4. 3자 의견을 비교하고, **Claude가 종합 판단을 내린다**:
+1. `gemini-ask`와 `codex-ask`를 **Bash tool `run_in_background: true`로 백그라운드 실행**
+2. 응답을 기다리는 동안 **Claude가 자신의 의견을 정리**한다
+3. Gemini/Codex 응답이 도착하면 3자 의견을 비교하고, **Claude가 종합 판단을 내린다**:
    - 합의점: 3자가 동의하는 부분
    - 쟁점: 의견이 갈리는 부분 + Claude의 최종 판단과 근거
    - 결론: Claude가 추천하는 방향
@@ -46,14 +45,16 @@ Claude는 **단순 정리자가 아니라 적극적 참여자**다:
 ## 사용 패턴
 
 ```bash
-# 일반 질문 병렬 호출
-gemini-ask --new "질문 내용" 2>&1
-codex-ask --new "질문 내용" 2>&1
+# 백그라운드 실행 (Bash tool에서 run_in_background: true 사용)
+gemini-ask --new "질문 내용" 2>&1   # run_in_background: true
+codex-ask --new "질문 내용" 2>&1    # run_in_background: true
 
-# 코드 리뷰 병렬 호출
-cat file.cpp | gemini-ask --new "이 코드를 리뷰해줘" 2>&1
-cat file.cpp | codex-ask --new "이 코드를 리뷰해줘" 2>&1
+# 코드 리뷰 백그라운드 실행
+cat file.cpp | gemini-ask --new "이 코드를 리뷰해줘" 2>&1   # run_in_background: true
+cat file.cpp | codex-ask --new "이 코드를 리뷰해줘" 2>&1    # run_in_background: true
 ```
+
+**Bash timeout은 600000ms (10분) 필수.**
 
 ## 출력 형식
 
