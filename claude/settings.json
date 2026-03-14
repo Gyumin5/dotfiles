@@ -9,7 +9,8 @@
       "Grep",
       "WebFetch",
       "WebSearch",
-      "NotebookEdit"
+      "NotebookEdit",
+      "Skill"
     ],
     "deny": [
       "Read(**/.env*)",
