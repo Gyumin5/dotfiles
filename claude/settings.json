@@ -63,14 +63,6 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/block-dangerous.sh"
-          },
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/block-main-push.sh"
-          },
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/auto-approve-bash.sh"
           }
         ]
       }
