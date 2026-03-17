@@ -46,13 +46,15 @@ Claude는 **단순 정리자가 아니라 적극적 참여자**다:
 
 ```bash
 # 백그라운드 실행 (Bash tool에서 run_in_background: true 사용)
-gemini-ask --new "질문 내용" 2>&1   # run_in_background: true
-codex-ask --new "질문 내용" 2>&1    # run_in_background: true
+gemini-ask --new "질문 내용" 2>&1        # run_in_background: true
+codex-ask --deep --new "질문 내용" 2>&1  # run_in_background: true
 
 # 코드 리뷰 백그라운드 실행
-cat file.cpp | gemini-ask --new "이 코드를 리뷰해줘" 2>&1   # run_in_background: true
-cat file.cpp | codex-ask --new "이 코드를 리뷰해줘" 2>&1    # run_in_background: true
+cat file.cpp | gemini-ask --new "이 코드를 리뷰해줘" 2>&1        # run_in_background: true
+cat file.cpp | codex-ask --deep --new "이 코드를 리뷰해줘" 2>&1  # run_in_background: true
 ```
+
+**주의: `--deep`은 codex-ask 전용. gemini-ask에는 사용 금지.**
 
 **⚠️ Bash timeout은 반드시 600000ms (10분)으로 설정. 기본값 2분이면 응답이 잘린다.**
 
