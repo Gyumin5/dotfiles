@@ -47,7 +47,8 @@ ln -sf "$DOTFILES_DIR/claude/CLAUDE.md" ~/.claude/CLAUDE.md
 ln -sf "$DOTFILES_DIR/claude/settings.json" ~/.claude/settings.json
 ln -sf "$DOTFILES_DIR/claude/mcp.json" ~/.claude/mcp.json
 
-# Claude hooks
+# Claude hooks (clean stale symlinks, then link current hooks)
+find ~/.claude/hooks/ -maxdepth 1 -type l ! -exec test -e {} \; -delete 2>/dev/null
 for hook in "$DOTFILES_DIR"/claude/hooks/*.sh; do
   ln -sf "$hook" ~/.claude/hooks/"$(basename "$hook")"
 done
