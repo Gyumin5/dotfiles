@@ -54,7 +54,7 @@ cat file.cpp | gemini-ask --new "이 코드를 리뷰해줘" 2>&1   # run_in_bac
 cat file.cpp | codex-ask --new "이 코드를 리뷰해줘" 2>&1    # run_in_background: true
 ```
 
-**Bash timeout은 600000ms (10분) 필수.**
+**⚠️ Bash timeout은 반드시 600000ms (10분)으로 설정. 기본값 2분이면 응답이 잘린다.**
 
 ## 출력 형식
 
