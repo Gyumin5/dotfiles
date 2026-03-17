@@ -25,8 +25,8 @@
 
 | 요청 유형                                                                   | 동작                      |
 | --------------------------------------------------------------------------- | ------------------------- |
-| "gemini로 해줘", "gemini한테 물어봐"                                        | ask-gemini skill 사용     |
-| "codex로 해줘", "codex한테 물어봐"                                          | ask-codex skill 사용      |
+| "gemini로 해줘", "gemini한테 물어봐"                                        | gemini-ask skill 사용     |
+| "codex로 해줘", "codex한테 물어봐"                                          | codex-ask skill 사용      |
 | "다른 AI한테 물어봐", "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언" 등 | ai-collaborate skill 사용 |
 | "코드 리뷰해줘", "리뷰해줘", "PR 리뷰"                                      | /code-review 실행         |
 

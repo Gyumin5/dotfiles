@@ -8,7 +8,7 @@ disable-model-invocation: false
 
 사용자가 "다른 AI한테 물어봐", "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언", "AI한테 리뷰해달라고 해" 등을 요청하면 이 skill을 따른다.
 
-**중요: ask-gemini, ask-codex skill을 호출하지 말 것. Bash tool로 직접 실행한다.**
+**중요: gemini-ask, codex-ask skill을 호출하지 말 것. Bash tool로 직접 실행한다.**
 
 ## 워크플로우
 

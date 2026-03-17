@@ -1,5 +1,5 @@
 ---
-name: ask-gemini
+name: gemini-ask
 description: Gemini CLI로 질문 전달. "gemini로 해줘", "gemini한테 물어봐" 등의 요청 시 자동 호출.
 disable-model-invocation: false
 ---

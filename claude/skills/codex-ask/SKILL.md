@@ -1,5 +1,5 @@
 ---
-name: ask-codex
+name: codex-ask
 description: Codex CLI로 질문 전달. "codex로 해줘", "codex한테 물어봐" 등의 요청 시 자동 호출.
 disable-model-invocation: false
 ---
