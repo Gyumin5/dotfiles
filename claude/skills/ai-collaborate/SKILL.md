@@ -54,7 +54,11 @@ cat file.cpp | gemini-ask --new "이 코드를 리뷰해줘" 2>&1   # run_in_bac
 cat file.cpp | codex-ask --new "이 코드를 리뷰해줘" 2>&1    # run_in_background: true
 ```
 
-**주의: `--deep`은 codex-ask 전용 (xhigh reasoning). 사용자가 명시할 때만 사용. gemini-ask에는 없는 옵션.**
+### Deep 모드
+
+사용자가 "깊게 생각해봐", "좀 더 열심히", "심층 분석", "deep" 등을 언급하면 codex-ask에 `--deep` 플래그를 추가한다.
+
+**`--deep`은 codex-ask 전용. gemini-ask에는 없는 옵션.**
 
 **⚠️ Bash timeout은 반드시 600000ms (10분)으로 설정. 기본값 2분이면 응답이 잘린다.**
 
