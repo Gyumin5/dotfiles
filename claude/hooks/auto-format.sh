@@ -1,6 +1,6 @@
 #!/bin/bash
 # Auto-format files after Write/Edit using prettier (if available)
-FILE_PATH=$(jq -r '.tool_input.file_path // .tool_input.file_path // empty')
+FILE_PATH=$(jq -r '.tool_input.file_path // empty')
 
 # Skip if no file path or prettier not available
 [ -z "$FILE_PATH" ] && exit 0

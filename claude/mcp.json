@@ -9,21 +9,17 @@
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
     },
     "arxiv-latex": {
-      "command": "uv",
+      "command": "bash",
       "args": [
-        "--directory",
-        "~/.local/share/mcp/arxiv-latex-mcp",
-        "run",
-        "server/main.py"
+        "-c",
+        "cd ~/.local/share/mcp/arxiv-latex-mcp && uv run server/main.py"
       ]
     },
     "academic-search": {
-      "command": "uv",
+      "command": "bash",
       "args": [
-        "--directory",
-        "~/.local/share/mcp/academic-search-mcp",
-        "run",
-        "server.py"
+        "-c",
+        "cd ~/.local/share/mcp/academic-search-mcp && uv run server.py"
       ]
     },
     "gemini-cli": {
@@ -35,8 +31,8 @@
       "args": ["-y", "@modelcontextprotocol/server-memory"]
     },
     "codex-cli": {
-      "command": "/home/gmoh/.nvm/versions/node/v22.17.0/bin/codex",
-      "args": ["mcp-server"]
+      "command": "bash",
+      "args": ["-c", "codex mcp-server"]
     }
   }
 }

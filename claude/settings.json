@@ -53,7 +53,9 @@
       "Write(**/*_history)",
       "Edit(**/*_history)"
     ],
-    "additionalDirectories": ["~"]
+    "additionalDirectories": [
+      "~"
+    ]
   },
   "hooks": {
     "PreToolUse": [

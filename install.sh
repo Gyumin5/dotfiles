@@ -67,7 +67,7 @@ fi
 
 # Custom scripts
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
-chmod +x ~/.local/bin/gemini-ask
+ln -sf "$DOTFILES_DIR/bin/codex-ask" ~/.local/bin/codex-ask
 
 # Install Claude Code
 if ! command -v claude &>/dev/null; then
@@ -144,6 +144,7 @@ echo "  ~/.claude/mcp.json -> $DOTFILES_DIR/claude/mcp.json"
 echo "  ~/.claude/hooks/ -> $DOTFILES_DIR/claude/hooks/"
 echo "  ~/.claude/skills/ -> $DOTFILES_DIR/claude/skills/"
 echo "  ~/.local/bin/gemini-ask -> $DOTFILES_DIR/bin/gemini-ask"
+echo "  ~/.local/bin/codex-ask -> $DOTFILES_DIR/bin/codex-ask"
 echo ""
 echo "Tools: cs (Claude Squad), npx ccusage (usage tracking)"
 echo "Plugins: claude-scientific-writer"
