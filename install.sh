@@ -69,6 +69,13 @@ fi
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 ln -sf "$DOTFILES_DIR/bin/codex-ask" ~/.local/bin/codex-ask
 
+# Shell aliases (add source line to bashrc if not present)
+if ! grep -q 'claude-aliases.sh' ~/.bashrc 2>/dev/null; then
+  echo "" >> ~/.bashrc
+  echo "# Claude Code aliases" >> ~/.bashrc
+  echo "[ -f \"$DOTFILES_DIR/shell/claude-aliases.sh\" ] && source \"$DOTFILES_DIR/shell/claude-aliases.sh\"" >> ~/.bashrc
+fi
+
 # Install Claude Code
 if ! command -v claude &>/dev/null; then
   if command -v npm &>/dev/null; then
