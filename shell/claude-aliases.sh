@@ -6,7 +6,7 @@ cl() {
   if tmux has-session -t "$name" 2>/dev/null; then
     tmux attach -t "$name"
   else
-    tmux new -s "$name" "claude -c --remote-control"
+    tmux new -s "$name" \; send-keys "claude -c --remote-control" Enter
   fi
 }
 
