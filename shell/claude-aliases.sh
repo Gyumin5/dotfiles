@@ -20,11 +20,14 @@ cla() {
 
 clr() {
   for session in $(tmux ls -F '#{session_name}' 2>/dev/null); do
+    echo "[$session] 리모트 끊는 중..."
     tmux send-keys -t "$session" "/remote-control" Enter
-    sleep 1
+    sleep 3
     tmux send-keys -t "$session" Up Up Enter
-    sleep 2
+    sleep 5
+    echo "[$session] 리모트 재연결 중..."
     tmux send-keys -t "$session" "/remote-control" Enter
+    sleep 3
   done
   echo "전체 세션 리모트 컨트롤 재연결 완료"
 }
