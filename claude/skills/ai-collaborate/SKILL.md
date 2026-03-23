@@ -33,6 +33,11 @@ disable-model-invocation: false
    - 개선 제안 종합
 4. 필요시 코드 수정안 제시
 
+## 파일 작업 규칙
+
+**Gemini/Codex는 의견만 제공한다. 파일 수정, 생성, 삭제는 반드시 Claude만 수행한다.**
+codex-ask에 `--full-auto` 등 파일 수정 옵션을 절대 사용하지 마라.
+
 ## Claude의 역할 (핵심)
 
 Claude는 **단순 정리자가 아니라 적극적 참여자**다:
