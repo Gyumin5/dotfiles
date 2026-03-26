@@ -14,7 +14,7 @@ cl() {
     tmux attach -t "$name"
   else
     tmux new-session -d -s "$name"
-    tmux send-keys -t "$name" "cd $PWD && claude -c --remote-control" Enter
+    tmux send-keys -t "$name" "cd $PWD && claude -c --remote-control --channels plugin:telegram@claude-plugins-official" Enter
     tmux attach -t "$name"
   fi
 }
@@ -41,7 +41,7 @@ clx() {
     [ ! -d "$dir" ] && continue
     local name=$(basename "$dir")
     tmux new-session -d -s "$name"
-    tmux send-keys -t "$name" "cd $dir && claude -c --remote-control" Enter
+    tmux send-keys -t "$name" "cd $dir && claude -c --remote-control --channels plugin:telegram@claude-plugins-official" Enter
     echo "[$name] 시작"
   done
   echo "전체 세션 재시작 완료"
