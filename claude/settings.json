@@ -104,9 +104,5 @@
       }
     }
   },
-  "effortLevel": "high",
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/statusline-command.sh"
-  }
+  "effortLevel": "high"
 }
