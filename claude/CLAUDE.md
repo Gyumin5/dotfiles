@@ -32,6 +32,13 @@
 
 **gemini-ask, codex-ask 호출 시 Bash timeout은 반드시 600000ms (10분). 기본값 2분이면 응답이 잘린다.**
 
+**AI 응답 필수 수신 규칙:**
+- AI 협업/토론 시 모든 AI의 응답을 **반드시** 받아야 한다. 응답 없이 혼자 진행하지 마라.
+- 응답이 안 오면 (timeout/실패): 이전 요청 프로세스를 kill 후 재시도 (중복 방지)
+- 재시도는 응답 받을 때까지 **무한정** 반복
+- 재시도할 때마다 텔레그램 + 터미널에 "N차 재시도 중" 알림
+- 응답 대기 시간은 충분히 길게 (timeout 600000ms)
+
 ## HTML 열기
 
 HTML 파일을 열 때 `xdg-open` 대신 `google-chrome`을 사용하라.
@@ -45,6 +52,53 @@ HTML 파일을 열 때 `xdg-open` 대신 `google-chrome`을 사용하라.
 
 - 텔레그램으로 reply를 보낸 후 터미널에 확인 메시지를 출력하지 마라
 - reply tool 호출만 하고 추가 텍스트 출력 없이 다음 입력을 기다려라
+
+## Memory 관리 규칙
+
+### 저장 기준
+
+- "다음 대화에서도 반복해서 쓸 가치가 있는가?"로 판단
+- 저장 우선순위: 사용자 규칙 > 프로젝트 결정 > 반복 피드백 > 참조 정보
+- 저장하지 말 것: 일회성 질문/답변, 코드에서 읽을 수 있는 것, 임시 상태, 긴 대화 원문
+
+### 파일 템플릿
+
+```markdown
+---
+name: 제목
+type: user/feedback/project/reference
+description: AI가 이 memory를 로드할지 판단하는 한 줄 설명
+last_updated: YYYY-MM-DD
+tags: [키워드1, 키워드2]
+---
+
+# Summary
+- 한 줄 핵심 요약
+
+# Current
+- 현재 유효한 사실/규칙/선호
+
+# History
+- YYYY-MM-DD: 변경 사유 (필요할 때만)
+```
+
+### 수정 원칙
+
+- 누적보다 **덮어쓰기(replace)** — 본문에는 현재 유효한 상태만 유지
+- 새 파일보다 **기존 파일 업데이트 우선**
+- 오래된 정보 처리: 쓸모없음 → 삭제 / 대체됨 → 덮어쓰기 + History 한 줄 / 참고 가치 → archive/ 이동
+
+### 분류 및 정리
+
+- **주제별 파일** 관리 (시간순 X)
+- 파일명에 type prefix: `user_`, `feedback_`, `project_`, `reference_`
+- MEMORY.md는 인덱스만 (파일당 1줄, 150자 이내)
+- 20개 넘거나 주 1회 중복/충돌 검토
+
+### AI 공유
+
+- 모든 AI 호출(gemini-ask, codex-ask) 시 프로젝트 memory를 프롬프트에 자동 첨부
+- description 필드로 관련 memory만 선택적 로딩 가능
 
 ## 세션 유지 (중요)
 
