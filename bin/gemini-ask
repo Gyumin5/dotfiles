@@ -102,16 +102,43 @@ else
 fi
 
 # Execute
-if [ -n "$RESUME_ARG" ]; then
-    if [ -t 0 ]; then
-        gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1
+run_gemini() {
+    local output exit_code
+    if [ -n "$RESUME_ARG" ]; then
+        if [ -t 0 ]; then
+            output=$(gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
+        else
+            output=$(cat | gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
+        fi
     else
-        cat | gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1
+        if [ -t 0 ]; then
+            output=$(gemini -p "$PROMPT" -o text 2>&1)
+        else
+            output=$(cat | gemini -p "$PROMPT" -o text 2>&1)
+        fi
     fi
-else
-    if [ -t 0 ]; then
-        gemini -p "$PROMPT" -o text 2>&1
-    else
-        cat | gemini -p "$PROMPT" -o text 2>&1
+    exit_code=$?
+
+    # 에러 감지 및 분류
+    if echo "$output" | grep -q "MODEL_CAPACITY_EXHAUSTED\|429"; then
+        echo "[gemini-ask] 서버 용량 부족 (429). Gemini 응답 실패." >&2
+        echo "$output"
+        return 2
+    elif echo "$output" | grep -q "401\|UNAUTHENTICATED"; then
+        echo "[gemini-ask] 인증 만료 (401). gcloud auth login 필요." >&2
+        echo "$output"
+        return 3
+    elif echo "$output" | grep -q "500\|INTERNAL"; then
+        echo "[gemini-ask] 서버 내부 오류 (500). 재시도 권장." >&2
+        echo "$output"
+        return 4
+    elif [ $exit_code -ne 0 ] && [ -z "$output" ]; then
+        echo "[gemini-ask] 빈 응답 (exit code: $exit_code)" >&2
+        return 1
     fi
-fi
+
+    echo "$output"
+    return $exit_code
+}
+
+run_gemini
