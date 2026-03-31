@@ -56,7 +56,7 @@ elif [ -n "$SESSION_ID" ]; then
     RESUME_ARG="--resume $SESSION_ID"
 elif [ -n "$TOPIC" ]; then
     # Parse `gemini --list-sessions` to find topic-matching session
-    SESSION_LIST=$(gemini --list-sessions 2>/dev/null || true)
+    SESSION_LIST=$(gemini --list-sessions 2>&1 || true)
 
     MATCHED_ID=$(echo "$SESSION_LIST" | python3 -c "
 import sys, re
@@ -85,7 +85,7 @@ for line in sys.stdin:
                 best_id = uuid
 
 print(best_id)
-" 2>/dev/null)
+" 2>&1)
 
     if [ -n "$MATCHED_ID" ]; then
         RESUME_ARG="--resume $MATCHED_ID"
@@ -95,7 +95,7 @@ print(best_id)
     fi
 else
     # Default: resume latest if exists
-    SESSION_LIST=$(gemini --list-sessions 2>/dev/null || true)
+    SESSION_LIST=$(gemini --list-sessions 2>&1 || true)
     if echo "$SESSION_LIST" | grep -q "Available sessions"; then
         RESUME_ARG="--resume latest"
     fi
@@ -104,14 +104,14 @@ fi
 # Execute
 if [ -n "$RESUME_ARG" ]; then
     if [ -t 0 ]; then
-        gemini $RESUME_ARG -p "$PROMPT" -o text 2>/dev/null
+        gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1
     else
-        cat | gemini $RESUME_ARG -p "$PROMPT" -o text 2>/dev/null
+        cat | gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1
     fi
 else
     if [ -t 0 ]; then
-        gemini -p "$PROMPT" -o text 2>/dev/null
+        gemini -p "$PROMPT" -o text 2>&1
     else
-        cat | gemini -p "$PROMPT" -o text 2>/dev/null
+        cat | gemini -p "$PROMPT" -o text 2>&1
     fi
 fi

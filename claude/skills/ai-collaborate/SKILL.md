@@ -31,6 +31,7 @@ fi
 ```
 
 프롬프트 구성:
+
 ```
 [Project Memory]
 {memory 내용}
@@ -45,7 +46,7 @@ fi
 
 **트리거:** "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언" 등
 
-1. `gemini-ask --new`와 `codex-ask --new`를 **Bash tool `run_in_background: true`로 백그라운드 실행**
+1. `gemini-ask --new`와 `codex-ask --new`를 **병렬 Bash tool call로 동시 실행** (foreground, timeout: 600000)
 2. 응답을 기다리는 동안 **Claude가 자신의 의견을 정리**한다
 3. Gemini/Codex 응답이 도착하면 3자 의견을 비교하고, **Claude가 종합 판단을 내린다**:
    - 합의점: 3자가 동의하는 부분
@@ -58,14 +59,15 @@ fi
 
 #### 라운드 1: 독립 의견 수집
 
-1. `gemini-ask --new "[memory] + 질문"` — 백그라운드
-2. `codex-ask --new "[memory] + 질문"` — 백그라운드
+1. `gemini-ask --new "[memory] + 질문"` — 병렬 foreground
+2. `codex-ask --new "[memory] + 질문"` — 병렬 foreground
 3. Claude도 자기 의견 정리
 4. 3자 응답 수집 후 쟁점 파악
 
 #### 라운드 2~N: 교차 토론
 
 1. 이전 라운드의 다른 AI 의견을 각 AI에게 전달 (세션 이어가기):
+
    ```bash
    # --new 없이 호출 → 이전 세션 이어감
    gemini-ask "다른 AI들의 의견입니다:
@@ -78,6 +80,7 @@ fi
    [Claude 의견] ...
    동의하는 부분과 반박할 부분을 구분해서 답변해줘." 2>&1
    ```
+
 2. Claude도 다른 AI 의견에 대한 반박/동의 정리
 3. 합의/쟁점 재분석
 
@@ -123,17 +126,14 @@ Claude는 **단순 정리자가 아니라 적극적 참여자**다:
 ## 사용 패턴
 
 ```bash
-# 단순 협업 (1라운드)
-gemini-ask --new "[memory]\n질문 내용" 2>&1   # run_in_background: true
-codex-ask --new "[memory]\n질문 내용" 2>&1    # run_in_background: true
+# 단순 협업 — 두 Bash tool을 병렬로 동시 호출 (run_in_background 사용 금지)
+gemini-ask --new "[memory]\n질문 내용" 2>&1   # Bash tool call 1 (timeout: 600000)
+codex-ask --new "[memory]\n질문 내용" 2>&1    # Bash tool call 2 (timeout: 600000)
+# → 두 결과가 모두 도착한 후 종합
 
-# 멀티라운드 토론 - 1라운드 (새 세션)
-gemini-ask --new "[memory]\n토론 주제" 2>&1   # run_in_background: true
-codex-ask --new "[memory]\n토론 주제" 2>&1    # run_in_background: true
-
-# 멀티라운드 토론 - 2라운드~ (세션 이어가기)
-gemini-ask "상대 의견: ... 반박해줘" 2>&1     # run_in_background: true
-codex-ask "상대 의견: ... 반박해줘" 2>&1      # run_in_background: true
+# 멀티라운드 토론도 동일하게 병렬 foreground
+gemini-ask "상대 의견: ... 반박해줘" 2>&1     # Bash tool call 1 (timeout: 600000)
+codex-ask "상대 의견: ... 반박해줘" 2>&1      # Bash tool call 2 (timeout: 600000)
 
 # 코드 리뷰
 cat file.cpp | gemini-ask --new "[memory]\n이 코드를 리뷰해줘" 2>&1

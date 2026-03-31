@@ -146,17 +146,33 @@ if [ -n "$STDIN_DATA" ]; then
 $PROMPT"
 fi
 
-# Run codex exec: extract only the response between "codex" and "tokens used"
+# Run codex exec: output full response, fallback to awk extraction if needed
 run_codex() {
     local effort_flag=""
     if [ "$DEEP" = true ]; then
         effort_flag='-c model_reasoning_effort="xhigh"'
     fi
-    eval codex exec --skip-git-repo-check $effort_flag '"$@"' 2>&1 | awk '
+    local raw
+    raw=$(eval codex exec --skip-git-repo-check $effort_flag '"$@"' 2>&1)
+    local exit_code=$?
+
+    # Try awk extraction first (between "codex" and "tokens used")
+    local extracted
+    extracted=$(echo "$raw" | awk '
         /^codex$/ { capture=1; next }
         /^tokens used$/ { capture=0; next }
         capture { print }
-    '
+    ')
+
+    if [ -n "$extracted" ]; then
+        echo "$extracted"
+    elif [ -n "$raw" ]; then
+        # awk extraction failed, output raw (CLI format may have changed)
+        echo "$raw"
+    else
+        echo "[codex-ask] 빈 응답 (exit code: $exit_code)" >&2
+    fi
+    return $exit_code
 }
 
 # Determine session handling
