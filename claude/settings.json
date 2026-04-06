@@ -1,4 +1,5 @@
 {
+  "respectGitignore": true,
   "permissions": {
     "allow": [
       "Bash([\\s\\S]*)",
@@ -10,7 +11,33 @@
       "WebFetch",
       "WebSearch",
       "NotebookEdit",
-      "Skill"
+      "Skill",
+      "mcp__lean-ctx__ctx_read",
+      "mcp__lean-ctx__ctx_shell",
+      "mcp__lean-ctx__ctx_search",
+      "mcp__lean-ctx__ctx_tree",
+      "mcp__lean-ctx__ctx_smart_read",
+      "mcp__lean-ctx__ctx_multi_read",
+      "mcp__lean-ctx__ctx_overview",
+      "mcp__lean-ctx__ctx_context",
+      "mcp__lean-ctx__ctx_session",
+      "mcp__lean-ctx__ctx_knowledge",
+      "mcp__lean-ctx__ctx_discover",
+      "mcp__lean-ctx__ctx_graph",
+      "mcp__lean-ctx__ctx_metrics",
+      "mcp__lean-ctx__ctx_compress",
+      "mcp__lean-ctx__ctx_delta",
+      "mcp__lean-ctx__ctx_dedup",
+      "mcp__lean-ctx__ctx_fill",
+      "mcp__lean-ctx__ctx_cache",
+      "mcp__lean-ctx__ctx_preload",
+      "mcp__lean-ctx__ctx_analyze",
+      "mcp__lean-ctx__ctx_benchmark",
+      "mcp__lean-ctx__ctx_intent",
+      "mcp__lean-ctx__ctx_semantic_search",
+      "mcp__lean-ctx__ctx_response",
+      "mcp__lean-ctx__ctx_agent",
+      "mcp__lean-ctx__ctx_wrapped"
     ],
     "deny": [
       "Read(**/.env*)",
@@ -20,12 +47,15 @@
       "Read(**/*.jks)",
       "Read(**/.ssh/**)",
       "Read(**/.aws/**)",
+      "Read(**/.gnupg/**)",
       "Read(**/.kube/config)",
       "Read(**/.docker/config.json)",
       "Read(**/.config/gh/hosts.yml)",
       "Read(**/.npmrc)",
       "Read(**/.netrc)",
       "Read(**/credentials*)",
+      "Read(**/secrets/**)",
+      "Read(**/*_history)",
       "Write(**/.env*)",
       "Write(**/*.pem)",
       "Write(**/*.key)",
@@ -33,68 +63,55 @@
       "Write(**/*.jks)",
       "Write(**/.ssh/**)",
       "Write(**/.aws/**)",
+      "Write(**/.gnupg/**)",
       "Write(**/.kube/config)",
       "Write(**/.docker/config.json)",
       "Write(**/.npmrc)",
       "Write(**/.netrc)",
       "Write(**/credentials*)",
+      "Write(**/secrets/**)",
+      "Write(**/*_history)",
       "Edit(**/.env*)",
       "Edit(**/*.pem)",
       "Edit(**/*.key)",
       "Edit(**/.ssh/**)",
       "Edit(**/.aws/**)",
+      "Edit(**/.gnupg/**)",
       "Edit(**/.npmrc)",
       "Edit(**/.netrc)",
       "Edit(**/credentials*)",
-      "Read(**/.gnupg/**)",
-      "Write(**/.gnupg/**)",
-      "Edit(**/.gnupg/**)",
-      "Read(**/*_history)",
-      "Write(**/*_history)",
+      "Edit(**/secrets/**)",
       "Edit(**/*_history)"
     ],
-    "additionalDirectories": ["~"]
+    "additionalDirectories": [
+      "~"
+    ]
   },
+  "model": "claude-opus-4-6",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|bash",
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/block-dangerous.sh"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/auto-format.sh"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/notify-done.sh"
+            "command": "/home/gmoh/.claude/hooks/lean-ctx-rewrite.sh"
           }
         ]
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "python3 ~/.claude/statusline.py"
+  },
   "enabledPlugins": {
-    "pyright-lsp@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true,
     "claude-scientific-writer@claude-scientific-writer": true,
-    "typescript-lsp@claude-plugins-official": true,
     "code-review@claude-plugins-official": true,
-    "telegram@claude-plugins-official": true
+    "pyright-lsp@claude-plugins-official": true,
+    "telegram@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "claude-scientific-writer": {

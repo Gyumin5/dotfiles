@@ -1,145 +1,102 @@
 # Global Instructions
 
+## 응답 원칙
+
+- 한국어 우선. 한자(漢字) 사용 금지.
+- 설명은 짧고 정확하게. 불확실하면 "확실하지 않다"고 명시.
+- 먼저 관련 파일과 진입점만 좁혀서 읽기. 불필요한 대규모 스캔 금지.
+- 변경은 작게, 검증은 자주.
+- 글 작성 시 `**굵게**` (별표 두 개 감싸기) 사용 금지. 강조는 대문자, 따옴표, 줄바꿈으로.
+
 ## 프로젝트 지식 자동 기록
 
-사용자가 프로젝트에 대한 지시를 할 때 (빌드 방법, 코드 스타일, 금지 사항, 워크플로우 등), 해당 내용을 **프로젝트 CLAUDE.md에 자동으로 기록**하라.
+사용자가 프로젝트 지시(빌드, 코드 스타일, 금지 사항, 워크플로우)를 하면 프로젝트 CLAUDE.md에 기록.
 
-**트리거 예시:**
-
-- "빌드는 catkin_make로 해" → CLAUDE.md의 Build 섹션에 기록
-- "이 파일은 건드리지 마" → Do not 섹션에 기록
-- "테스트는 pytest로 돌려" → Test 섹션에 기록
-- "ROS2 패턴 쓰지 마" → Do not 섹션에 기록
-
-**규칙:**
-
-- 프로젝트 루트에 CLAUDE.md가 없으면 생성할지 사용자에게 물어봐라
-- 이미 있으면 해당 섹션에 추가
-- 기록 후 "CLAUDE.md에 기록했습니다"라고 짧게 알려라
-- 일회성 지시("이번만 이렇게 해")는 기록하지 마라
+- CLAUDE.md 없으면 생성 여부를 물어볼 것
+- 기록 후 "CLAUDE.md에 기록했습니다" 한 줄만 출력
+- 일회성 지시는 기록하지 않음
 
 ## AI 협업 규칙 (최우선)
 
-**"AI", "gemini", "codex"가 포함된 요청은 아래 규칙이 다른 모든 skill보다 우선한다.**
-주제가 논문이든 코드든 상관없이, AI 협업 키워드가 있으면 반드시 아래대로 처리:
+**"AI", "gemini", "codex" 키워드가 있으면 다른 모든 skill보다 우선.**
 
-| 요청 유형                                                                   | 동작                      |
-| --------------------------------------------------------------------------- | ------------------------- |
-| "gemini로 해줘", "gemini한테 물어봐"                                        | gemini-ask skill 사용     |
-| "codex로 해줘", "codex한테 물어봐"                                          | codex-ask skill 사용      |
-| "다른 AI한테 물어봐", "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언" 등 | ai-collaborate skill 사용 |
-| "코드 리뷰해줘", "리뷰해줘", "PR 리뷰"                                      | /code-review 실행         |
+| 요청                                 | 동작                 |
+| ------------------------------------ | -------------------- |
+| "gemini로/한테"                      | gemini-ask skill     |
+| "codex로/한테"                       | codex-ask skill      |
+| "AI 협업/크로스체크/세컨드 오피니언" | ai-collaborate skill |
+| "코드 리뷰/PR 리뷰"                  | /code-review         |
 
-**gemini-ask, codex-ask 호출 시 Bash timeout은 반드시 600000ms (10분). 기본값 2분이면 응답이 잘린다.**
+**필수 규칙:**
 
-**AI 응답 필수 수신 규칙:**
+- Bash timeout 600000ms (10분)
+- AI 협업 시 gemini-ask + codex-ask **둘 다** 호출. 한쪽만 호출 금지.
+- 모든 AI 응답을 반드시 수신. 응답 없이 진행 금지.
+- 실패 시 해당 PID만 kill 후 재시도 (pkill 금지). 무한 재시도.
 
-- AI 협업/토론 시 **gemini-ask와 codex-ask 둘 다** 호출해야 한다. 한쪽만 호출하지 마라.
-- 모든 AI의 응답을 **반드시** 받아야 한다. 응답 없이 혼자 진행하지 마라.
-- 응답이 안 오면 (timeout/실패): 해당 백그라운드 task의 PID만 kill 후 재시도 (pkill로 전체 프로세스를 죽이지 마라, 다른 세션의 요청이 죽을 수 있음)
-- 재시도는 응답 받을 때까지 **무한정** 반복
-- 재시도할 때마다 텔레그램 + 터미널에 "N차 재시도 중" 알림
-- 응답 대기 시간은 충분히 길게 (timeout 600000ms)
+## 복잡도 판단 및 안내
 
-## HTML 열기
+요청을 받으면 먼저 복잡도를 판단하라. 아래에 해당하면 바로 실행하지 말고 안내 + 복사 가능한 프롬프트를 제공:
 
-HTML 파일을 열 때 `xdg-open` 대신 `google-chrome`을 사용하라.
+- **판단력 필요** (복잡한 버그, 설계 결정, 논문 분석 등) → `think`를 앞에 붙인 전체 프롬프트를 만들어서 제공
+- **작업량 많음** (대규모 리팩토링, 여러 파일 동시 수정, 새 기능 전체 구현) → `/effort high` 전환을 안내한 뒤 프롬프트 제공
+- **둘 다** → `/effort high` 전환 안내 + `think` 포함 프롬프트 제공
 
-## 파일 탐색 범위
+프롬프트는 사용자가 그대로 복사해서 입력할 수 있는 완성형으로 작성. 단순 작업은 안내 없이 바로 실행.
 
-- 사용자가 명시적으로 경로를 지정하지 않는 한, **현재 프로젝트 디렉토리 내에서만** 파일을 검색하라
-- 프로젝트 외부 경로를 자의적으로 탐색하지 마라
+## 도구 규칙
 
-## 텔레그램 채널 응답
+- HTML 열기: `xdg-open` 대신 `google-chrome`
+- 파일 탐색: 사용자가 경로를 지정하지 않으면 현재 프로젝트 내에서만 검색
+- 텔레그램 reply 후 터미널에 확인 메시지 출력하지 않음
 
-- 텔레그램으로 reply를 보낸 후 터미널에 확인 메시지를 출력하지 마라
-- reply tool 호출만 하고 추가 텍스트 출력 없이 다음 입력을 기다려라
-
-## Memory 관리 규칙
+## Memory 관리
 
 ### 저장 기준
 
-- "다음 대화에서도 반복해서 쓸 가치가 있는가?"로 판단
-- 저장 우선순위: 사용자 규칙 > 프로젝트 결정 > 반복 피드백 > 참조 정보
-- 저장하지 말 것: 일회성 질문/답변, 코드에서 읽을 수 있는 것, 임시 상태, 긴 대화 원문
+- "다음 대화에서도 쓸 가치가 있는가?"로 판단
+- 우선순위: 사용자 규칙 > 프로젝트 결정 > 피드백 > 참조
+- 저장 금지: 일회성 Q&A, 코드에서 읽을 수 있는 것, 임시 상태
 
-### 파일 템플릿
+### 파일 규칙
 
-```markdown
----
-name: 제목
-type: user/feedback/project/reference
-description: AI가 이 memory를 로드할지 판단하는 한 줄 설명
-last_updated: YYYY-MM-DD
-tags: [키워드1, 키워드2]
----
-
-# Summary
-
-- 한 줄 핵심 요약
-
-# Current
-
-- 현재 유효한 사실/규칙/선호
-
-# History
-
-- YYYY-MM-DD: 변경 사유 (필요할 때만)
-```
-
-### 수정 원칙
-
-- 누적보다 **덮어쓰기(replace)** — 본문에는 현재 유효한 상태만 유지
-- 새 파일보다 **기존 파일 업데이트 우선**
-- 오래된 정보 처리: 쓸모없음 → 삭제 / 대체됨 → 덮어쓰기 + History 한 줄 / 참고 가치 → archive/ 이동
-
-### 분류 및 정리
-
-- **주제별 파일** 관리 (시간순 X)
-- 파일명에 type prefix: `user_`, `feedback_`, `project_`, `reference_`
+- 주제별 관리. 파일명 prefix: `user_`, `feedback_`, `project_`, `reference_`
+- 누적보다 덮어쓰기. 현재 유효한 상태만 유지
 - MEMORY.md는 인덱스만 (파일당 1줄, 150자 이내)
-- 20개 넘거나 주 1회 중복/충돌 검토
+- AI 호출 시 관련 memory 자동 첨부
 
-### AI 공유
+## 세션 유지
 
-- 모든 AI 호출(gemini-ask, codex-ask) 시 프로젝트 memory를 프롬프트에 자동 첨부
-- description 필드로 관련 memory만 선택적 로딩 가능
+- **"새 세션을 열라" 제안 금지.** 같은 세션에서 계속 작업.
+- 압축 후 `progress.md`를 먼저 읽고 이어서 진행.
 
-## 세션 유지 (중요)
+## progress.md
 
-- **절대 "새 세션을 열라"고 제안하지 마라.** 컨텍스트가 길어져도 같은 세션에서 계속 작업한다.
-- 압축이 되면 `progress.md`를 읽고 이어서 진행하라.
+작업 요청 시 생성, 단위 완료 시 업데이트, "완료" 시 삭제. 항상 덮어쓰기.
 
-## 작업 상태 유지 (progress.md)
+## history.md
 
-**언제 작성:** 사용자가 작업을 요청하면 즉시 `progress.md`를 생성/업데이트
-**언제 업데이트:** 의미 있는 단위가 완료될 때마다 (파일 수정, 빌드 성공, 테스트 통과 등)
-**언제 삭제:** 사용자가 "다 됐어", "완료" 등 명시적으로 종료할 때
-**형식:**
+프로젝트 루트에 완료 작업 누적 기록. 형식: `- [YYYY-MM-DD] 내용`
 
-```markdown
-# 현재 작업: [작업 제목]
+## 압축 전 저장
 
-## 완료
+사용자가 "압축할 거니 저장해" 또는 유사 표현을 하면:
+1. progress.md — 현재 진행 중인 작업 상태 저장 (덮어쓰기)
+2. history.md — 이번 세션에서 완료한 작업 추가 (누적)
 
-- [x] 내용 (파일명 등 구체적으로)
+# lean-ctx — Context Engineering Layer
+<!-- lean-ctx-rules-v5 -->
 
-## 진행 중
+MANDATORY: Use lean-ctx MCP tools for ALL reads and searches. Native Read/Grep/Shell are FORBIDDEN.
 
-- [ ] 내용
+| FORBIDDEN | USE INSTEAD |
+|-----------|-------------|
+| `Read` / `cat` / `head` / `tail` | `ctx_read(path)` — cached, 8 compression modes |
+| `Shell` / `bash` / terminal | `ctx_shell(command)` — pattern compression |
+| `Grep` / `rg` / search | `ctx_search(pattern, path)` — compact results |
+| `ls` / `find` / `tree` | `ctx_tree(path, depth)` — directory maps |
 
-## 다음
+Keep using Write, StrReplace, Delete, Glob normally (no lean-ctx replacement).
 
-- [ ] 내용
-```
-
-- 컨텍스트 압축 후에는 **반드시 `progress.md`를 먼저 읽어라**
-- 항상 **덮어쓰기** (누적하지 않음, 현재 상태만 유지)
-
-## 작업 히스토리 (history.md)
-
-프로젝트 루트에 `history.md`를 유지하며 **완료된 작업을 날짜와 함께 기록**한다.
-
-- 작업이 완료될 때마다 한 줄 추가 (삭제하지 않음, 계속 누적)
-- 형식: `- [YYYY-MM-DD] 작업 내용 요약`
-- 너무 길어지면 오래된 항목을 월 단위로 요약
+REMINDER: NEVER use Read, Shell, Grep, or ls. ALWAYS use ctx_read, ctx_shell, ctx_search, ctx_tree.
+<!-- /lean-ctx -->

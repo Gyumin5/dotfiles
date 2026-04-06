@@ -9,7 +9,7 @@
 #   gemini-ask --list                           - 세션 목록
 #   echo "code" | gemini-ask "리뷰해줘"         - stdin pipe 지원
 
-set -euo pipefail
+set -uo pipefail
 
 FORCE_NEW=false
 TOPIC=""

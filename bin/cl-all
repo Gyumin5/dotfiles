@@ -1,0 +1,25 @@
+#!/bin/bash
+# cl-all: 모든 Claude Code 세션을 gnome-terminal 탭으로 한번에 열기
+
+DIRS=(
+  "$HOME/av-ros/test/helipr"
+  "$HOME/av-ros/test/bias"
+  "$HOME/mon/251229"
+  "$HOME/test_claude"
+  "$HOME/albert"
+  "$HOME/resume"
+)
+
+# 첫 번째 탭으로 터미널 열기
+FIRST="${DIRS[0]}"
+TAB_ARGS="--tab --title=$(basename "$FIRST") --working-directory=$FIRST -e 'bash -c \"source ~/.bashrc; cl; exec bash\"'"
+
+# 나머지 탭 추가
+CMD="gnome-terminal --tab --title=\"$(basename "$FIRST")\" --working-directory=\"$FIRST\" -- bash -c 'source ~/.bashrc; cl; exec bash'"
+
+for dir in "${DIRS[@]:1}"; do
+  name=$(basename "$dir")
+  CMD="$CMD --tab --title=\"$name\" --working-directory=\"$dir\" -- bash -c 'source ~/.bashrc; cl; exec bash'"
+done
+
+eval $CMD
