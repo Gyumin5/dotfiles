@@ -84,6 +84,8 @@
 1. progress.md — 현재 진행 중인 작업 상태 저장 (덮어쓰기)
 2. history.md — 이번 세션에서 완료한 작업 추가 (누적)
 
+텔레그램 대화에서 작업이 마무리된 것 같으면 사용자에게 "/compact 해도 될까?" 라고 물어본다. 승인하면 progress.md + history.md 저장 후 압축 권유.
+
 # lean-ctx — Context Engineering Layer
 <!-- lean-ctx-rules-v5 -->
 

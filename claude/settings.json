@@ -2,7 +2,7 @@
   "respectGitignore": true,
   "permissions": {
     "allow": [
-      "Bash([\\s\\S]*)",
+      "Bash(*)",
       "Read",
       "Write",
       "Edit",
@@ -81,7 +81,17 @@
       "Edit(**/.netrc)",
       "Edit(**/credentials*)",
       "Edit(**/secrets/**)",
-      "Edit(**/*_history)"
+      "Edit(**/*_history)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~/*)",
+      "Bash(sudo *)",
+      "Bash(curl * | bash)",
+      "Bash(curl * | sh)",
+      "Bash(wget * | bash)",
+      "Bash(wget * | sh)",
+      "Bash(dd *)",
+      "Bash(mkfs*)",
+      "Bash(chmod -R 777 *)"
     ],
     "additionalDirectories": [
       "~"
