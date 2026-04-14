@@ -106,15 +106,15 @@ run_gemini() {
     local output exit_code
     if [ -n "$RESUME_ARG" ]; then
         if [ -t 0 ]; then
-            output=$(gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
+            output=$(timeout --kill-after=10s 600 gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
         else
-            output=$(cat | gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
+            output=$(cat | timeout --kill-after=10s 600 gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
         fi
     else
         if [ -t 0 ]; then
-            output=$(gemini -p "$PROMPT" -o text 2>&1)
+            output=$(timeout --kill-after=10s 600 gemini -p "$PROMPT" -o text 2>&1)
         else
-            output=$(cat | gemini -p "$PROMPT" -o text 2>&1)
+            output=$(cat | timeout --kill-after=10s 600 gemini -p "$PROMPT" -o text 2>&1)
         fi
     fi
     exit_code=$?

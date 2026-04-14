@@ -1,0 +1,21 @@
+[Unit]
+Description=Claude Code session for test_claude (telegram remote-control)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/gmoh/test_claude
+Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="TELEGRAM_STATE_DIR=/home/gmoh/test_claude/.claude/telegram"
+Environment="TERM=xterm-256color"
+ExecStart=/bin/bash -c 'exec script -q -c "claude -c --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null || exec script -q -c "claude --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null'
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/gmoh/.claude/logs/claude-test-claude.log
+StandardError=append:/home/gmoh/.claude/logs/claude-test-claude.log
+KillMode=mixed
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

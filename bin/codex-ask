@@ -153,7 +153,7 @@ run_codex() {
         effort_flag='-c model_reasoning_effort="xhigh"'
     fi
     local raw
-    raw=$(eval codex exec --skip-git-repo-check $effort_flag '"$@"' 2>&1)
+    raw=$(eval timeout --kill-after=10s 600 codex exec --skip-git-repo-check $effort_flag '"$@"' 2>&1)
     local exit_code=$?
 
     # Try awk extraction first (between "codex" and "tokens used")

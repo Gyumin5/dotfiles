@@ -1,4 +1,6 @@
 # Claude Code aliases
+# cl: 터미널에서 Claude Code 세션 붙기. systemd 서비스가 있으면 자동으로 멈추고
+#     종료 시 다시 살림. 없으면 그냥 일반 cl 동작.
 cl() {
   # 텔레그램 페어링 자동 유지: 글로벌 access.json에 ID 주입
   local _tg_access="$HOME/.claude/channels/telegram/access.json"
@@ -20,6 +22,24 @@ except: pass
   if [ -d ".claude/telegram" ]; then
     _base_args="$_base_args --channels plugin:telegram@claude-plugins-official"
     export TELEGRAM_STATE_DIR="$(pwd)/.claude/telegram"
+  fi
+
+  # systemd 서비스가 관리 중이면: failed 자동 복구 + stop → exit 시 auto-start
+  local _svc="claude-$(basename "$PWD")"
+  if systemctl --user list-unit-files "$_svc.service" 2>/dev/null | grep -q "$_svc"; then
+    # failed 상태면 카운터 리셋 (반복 실패로 멈춰있을 수 있음)
+    if systemctl --user is-failed --quiet "$_svc" 2>/dev/null; then
+      echo "[cl] $_svc failed 상태 감지 → reset-failed"
+      systemctl --user reset-failed "$_svc"
+    fi
+    if systemctl --user is-active --quiet "$_svc" 2>/dev/null; then
+      echo "[cl] systemd $_svc stop"
+      if ! systemctl --user stop "$_svc"; then
+        echo "[cl] stop 실패 → SIGKILL"
+        systemctl --user kill -s KILL "$_svc" 2>/dev/null
+      fi
+    fi
+    trap "echo '[cl] systemd $_svc restart'; systemctl --user reset-failed '$_svc' 2>/dev/null; systemctl --user start '$_svc'" EXIT INT
   fi
 
   # -c로 이어가기 시도, 실패하면 새 세션
