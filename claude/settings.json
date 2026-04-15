@@ -109,6 +109,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/auto-verify.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

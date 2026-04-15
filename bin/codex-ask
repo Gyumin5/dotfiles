@@ -176,10 +176,18 @@ run_codex() {
 }
 
 # Determine session handling
+run_codex_filtered() {
+    if [ "${AI_OUT_RAW:-}" = "1" ]; then
+        run_codex "$@"
+    else
+        run_codex "$@" | ai-out-filter codex
+    fi
+}
+
 if [ "$FORCE_NEW" = true ]; then
-    run_codex "$PROMPT"
+    run_codex_filtered "$PROMPT"
 elif [ -n "$SESSION_ID" ]; then
-    run_codex resume "$SESSION_ID" "$PROMPT"
+    run_codex_filtered resume "$SESSION_ID" "$PROMPT"
 elif [ -n "$TOPIC" ]; then
     MATCHED_ID=""
     if [ -d "$SESSIONS_DIR" ]; then
@@ -192,9 +200,9 @@ elif [ -n "$TOPIC" ]; then
     fi
 
     if [ -n "$MATCHED_ID" ]; then
-        run_codex resume "$MATCHED_ID" "$PROMPT"
+        run_codex_filtered resume "$MATCHED_ID" "$PROMPT"
     else
-        run_codex "$PROMPT"
+        run_codex_filtered "$PROMPT"
     fi
 else
     # Default: resume latest session matching current cwd
@@ -206,8 +214,8 @@ else
     fi
 
     if [ -n "$LATEST_ID" ]; then
-        run_codex resume "$LATEST_ID" "$PROMPT"
+        run_codex_filtered resume "$LATEST_ID" "$PROMPT"
     else
-        run_codex "$PROMPT"
+        run_codex_filtered "$PROMPT"
     fi
 fi

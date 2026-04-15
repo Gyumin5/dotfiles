@@ -141,4 +141,8 @@ run_gemini() {
     return $exit_code
 }
 
-run_gemini
+if [ "${AI_OUT_RAW:-}" = "1" ]; then
+    run_gemini
+else
+    run_gemini | ai-out-filter gemini
+fi
