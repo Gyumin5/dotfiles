@@ -1,0 +1,66 @@
+#!/bin/bash
+# claude-daily-research: 매일 아침 Claude Code 개선거리 리서치 + AI 토론 + 텔레그램 전송
+# 기존 ai-morning-briefing / ai-briefing-review / ai-weekly-review를 대체.
+
+set -uo pipefail
+
+export NVM_DIR="$HOME/.nvm"
+set +u
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+set -u
+export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+
+TELEGRAM_ENV="/home/gmoh/test_claude/.claude/telegram/.env"
+CHAT_ID="8689118207"
+DATA_DIR="/home/gmoh/.local/share/ai-briefing"
+TODAY="$(date +%Y-%m-%d)"
+OUT_FILE="$DATA_DIR/claude-research_${TODAY}.md"
+LOG_FILE="$DATA_DIR/claude-research.log"
+
+mkdir -p "$DATA_DIR"
+[ -f "$TELEGRAM_ENV" ] && source "$TELEGRAM_ENV"
+BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-${BOT_TOKEN:-}}"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
+
+PROMPT=$(cat <<'EOF'
+오늘 Claude Code 개선 리서치 수행.
+
+절차:
+1. WebSearch로 최근 7일 내 Claude Code / Claude Agent SDK / AI 에이전트 관련 새 기능·skill·plugin·MCP·hook·워크플로우 3~5개 찾기
+2. 각 항목에 대해 codex-ask 와 gemini-ask 를 병렬 호출해서 적용 적합성 평가 (한 쪽만 호출 금지)
+   내 환경: Ubuntu, Claude Code 2.1, 플러그인(telegram, lean-ctx, code-review, scientific-writer, clangd/pyright/typescript lsp), 스킬(gemini-ask, codex-ask, ai-collaborate, update-config, loop, schedule 등), dotfiles 관리
+3. 각 항목 최종 판정: 도입 / 보류 / 비추 + 이유 1줄 + 적용 난이도(쉬움/중간/어려움)
+4. 한국어 평문 한 덩어리로 정리. 백틱/코드펜스 금지, **굵게** 금지, 맨앞 공백/들여쓰기 금지 (텔레그램 복붙 가능하게)
+5. 최종 텍스트만 stdout으로 출력. 서론·메타 멘트 금지.
+EOF
+)
+
+log "start"
+OUTPUT=$(timeout 900 claude -p "$PROMPT" 2>> "$LOG_FILE") || true
+log "claude exit. length=${#OUTPUT}"
+
+if [ -z "$OUTPUT" ]; then
+    log "ERROR: 빈 응답"
+    exit 1
+fi
+
+echo "$OUTPUT" > "$OUT_FILE"
+
+if [ -z "$BOT_TOKEN" ]; then
+    log "ERROR: 봇 토큰 없음"
+    exit 2
+fi
+
+MSG="Claude Code 개선 리서치 (${TODAY})
+
+${OUTPUT}"
+if [ ${#MSG} -gt 4000 ]; then
+    MSG="${MSG:0:3997}..."
+fi
+
+curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+    --data-urlencode "chat_id=${CHAT_ID}" \
+    --data-urlencode "text=${MSG}" >> "$LOG_FILE" 2>&1
+
+log "sent (${#MSG} chars)"
