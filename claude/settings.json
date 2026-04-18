@@ -129,6 +129,26 @@
           }
         ]
       }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/postcompact-mark.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/postcompact-warn.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

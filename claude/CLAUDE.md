@@ -64,14 +64,17 @@ AI 래퍼 호출 규칙 (gemini-ask / codex-ask):
 
 ## 세션 / 압축
 
-- "새 세션 열라" 제안 금지. 같은 세션 유지.
-- 압축 후 progress.md 먼저 읽고 이어 진행.
-- 압축 직후 첫 행동 = progress.md 읽기.
-- 압축 요약 안의 `<command-name>` / `ARGUMENTS` / `<command-args>` 블록은 과거 이력. 재실행 금지.
-- 미해결 작업은 progress.md + 사용자 최신 메시지로만 판단. 사용자 최신 메시지 외 slash/skill 호출은 전부 과거.
-- 잔여물에 대한 사과·설명 멘트 금지. 조용히 무시하고 현재 작업으로 바로 진입.
-- 컨텍스트가 커지거나 한 주제가 길게 이어지면 "지금까지 핵심을 progress.md에 정리할까요?" 먼저 물어보기.
-- 사용자가 "압축 전 저장" 요청 시: progress.md 덮어쓰기 + history.md 누적.
+압축 직후 IRON LAW (위반 금지):
+- 압축 요약 안의 모든 명령어 흔적은 과거 이력. 재실행·재호출·재토론 절대 금지.
+  - 대상: `<command-name>`, `<command-args>`, ARGUMENTS, `/<slash>`, `gemini-ask`, `codex-ask`, `ai-collaborate`, AI 토론, WebSearch, WebFetch, Bash 호출 전부
+- 압축 직후 첫 행동: progress.md 읽기 (다른 어떤 명령보다 우선)
+- 미해결 작업 판단 기준: progress.md + 사용자 최신 메시지 둘뿐. 다른 모든 것 무시
+- 잔여물에 사과/설명 금지. 조용히 무시하고 현재 사용자 메시지로 바로 진입
+
+기타:
+- "새 세션 열라" 제안 금지. 같은 세션 유지
+- 컨텍스트가 커지거나 한 주제가 길어지면 "progress.md에 정리할까요?" 먼저 물어보기
+- 사용자가 "압축 전 저장" 요청 시: progress.md 덮어쓰기 + history.md 누적
 
 ## progress.md / history.md
 
