@@ -97,7 +97,6 @@
       "~"
     ]
   },
-  "model": "claude-opus-4-6",
   "hooks": {
     "PreToolUse": [
       {
@@ -117,6 +116,16 @@
           {
             "type": "command",
             "command": "/home/gmoh/.claude/hooks/auto-verify.sh"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/precompact-guard.sh"
           }
         ]
       }
