@@ -79,6 +79,11 @@ except: pass
     fi
   done
 
+  # 세션 시작 알림 (텔레그램 봇이 설정된 프로젝트만)
+  if [ -f ".claude/telegram/.env" ] && command -v claude-service-notify >/dev/null 2>&1; then
+    TELEGRAM_STATE_DIR="$_pwd/.claude/telegram" claude-service-notify start "cl:$(basename "$_pwd")" &
+  fi
+
   # -c로 이어가기 시도
   claude -c $_base_args 2>/dev/null
   local _ec=$?
