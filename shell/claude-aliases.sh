@@ -63,6 +63,12 @@ except: pass
     fi
   done
 
-  # -c로 이어가기 시도, 실패하면 새 세션
-  claude -c $_base_args 2>/dev/null || claude $_base_args
+  # -c로 이어가기 시도
+  claude -c $_base_args 2>/dev/null
+  local _ec=$?
+  # exit 1 (이전 세션 없음)일 때만 새 세션으로 fallback.
+  # 시그널로 죽은 경우(128+)는 그대로 종료해야 다른 cl에게 뺏긴 뒤 여기서 또 살아나는 사고 방지.
+  if [ "$_ec" -eq 1 ]; then
+    claude $_base_args
+  fi
 }
