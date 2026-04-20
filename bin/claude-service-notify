@@ -1,0 +1,30 @@
+#!/bin/bash
+# claude-service-notify: systemd claude-*.service의 ExecStartPost/ExecStopPost에서 호출.
+# TELEGRAM_STATE_DIR/.env의 BOT_TOKEN으로 사용자에게 기동/종료 알림 전송.
+# Usage: claude-service-notify <start|stop> <service-name>
+
+set -uo pipefail
+
+EVENT="${1:-start}"
+SVC="${2:-claude}"
+CHAT_ID="${TELEGRAM_CHAT_ID:-8689118207}"
+
+STATE_DIR="${TELEGRAM_STATE_DIR:-}"
+[ -z "$STATE_DIR" ] && exit 0
+[ -f "$STATE_DIR/.env" ] || exit 0
+
+# shellcheck disable=SC1090
+. "$STATE_DIR/.env"
+TOKEN="${TELEGRAM_BOT_TOKEN:-${BOT_TOKEN:-}}"
+[ -z "$TOKEN" ] && exit 0
+
+case "$EVENT" in
+    start) TEXT="✅ $SVC 기동됨 ($(date '+%H:%M:%S'))" ;;
+    stop)  TEXT="⏹ $SVC 종료됨 ($(date '+%H:%M:%S'))" ;;
+    *)     TEXT="$SVC event=$EVENT ($(date '+%H:%M:%S'))" ;;
+esac
+
+curl -s -m 5 -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+    --data-urlencode "chat_id=${CHAT_ID}" \
+    --data-urlencode "text=${TEXT}" > /dev/null 2>&1 || true
+exit 0
