@@ -24,6 +24,7 @@ except: pass
     export TELEGRAM_STATE_DIR="$(pwd)/.claude/telegram"
   fi
 
+  local _pwd="$PWD"
   # systemd 서비스가 관리 중이면: failed 자동 복구 + stop → exit 시 auto-start
   # systemd unit 이름 규약상 언더스코어를 대시로 정규화
   local _svc="claude-$(basename "$PWD" | tr '_' '-')"
@@ -40,11 +41,26 @@ except: pass
         systemctl --user kill -s KILL "$_svc" 2>/dev/null
       fi
     fi
-    trap "echo '[cl] systemd $_svc restart'; systemctl --user reset-failed '$_svc' 2>/dev/null; systemctl --user start '$_svc'" EXIT INT
+    # trap: 셸 종료 시 같은 경로에 다른 claude 없으면 service 재기동.
+    # 다른 cl 세션이 이미 이 프로젝트를 잡고 있으면 service 재기동을 생략해서
+    # 충돌/중복 세션 방지.
+    trap '
+      _pwd_exit='"'$_pwd'"'
+      _svc_exit='"'$_svc'"'
+      for _pp in $(pgrep -f "^claude.*--remote-control" 2>/dev/null); do
+        _cwd_exit=$(readlink /proc/$_pp/cwd 2>/dev/null)
+        if [ "$_cwd_exit" = "$_pwd_exit" ]; then
+          echo "[cl] 다른 cl 세션($_pp) 살아있음 → service 재기동 생략"
+          exit 0
+        fi
+      done
+      echo "[cl] systemd $_svc_exit restart"
+      systemctl --user reset-failed "$_svc_exit" 2>/dev/null
+      systemctl --user start "$_svc_exit"
+    ' EXIT INT
   fi
 
   # 같은 경로에서 돌아가는 다른 터미널 cl 세션이 있으면 강제 종료 (봇 토큰 경쟁 방지)
-  local _pwd="$PWD"
   local _p _cwd
   for _p in $(pgrep -f "^claude.*--remote-control" 2>/dev/null); do
     _cwd=$(readlink "/proc/$_p/cwd" 2>/dev/null)
