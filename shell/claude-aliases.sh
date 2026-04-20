@@ -43,6 +43,26 @@ except: pass
     trap "echo '[cl] systemd $_svc restart'; systemctl --user reset-failed '$_svc' 2>/dev/null; systemctl --user start '$_svc'" EXIT INT
   fi
 
+  # 같은 경로에서 돌아가는 다른 터미널 cl 세션이 있으면 강제 종료 (봇 토큰 경쟁 방지)
+  local _pwd="$PWD"
+  local _p _cwd
+  for _p in $(pgrep -f "^claude.*--remote-control" 2>/dev/null); do
+    _cwd=$(readlink "/proc/$_p/cwd" 2>/dev/null)
+    if [ "$_cwd" = "$_pwd" ]; then
+      echo "[cl] 기존 claude 세션 $_p 종료 (같은 경로)"
+      kill -TERM "$_p" 2>/dev/null
+    fi
+  done
+  # TERM이 먹었는지 2초 대기 후 살아있으면 KILL
+  sleep 2
+  for _p in $(pgrep -f "^claude.*--remote-control" 2>/dev/null); do
+    _cwd=$(readlink "/proc/$_p/cwd" 2>/dev/null)
+    if [ "$_cwd" = "$_pwd" ]; then
+      echo "[cl] $_p SIGKILL"
+      kill -KILL "$_p" 2>/dev/null
+    fi
+  done
+
   # -c로 이어가기 시도, 실패하면 새 세션
   claude -c $_base_args 2>/dev/null || claude $_base_args
 }
