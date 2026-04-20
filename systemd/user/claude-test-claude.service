@@ -10,7 +10,7 @@ Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin
 Environment="TELEGRAM_STATE_DIR=/home/gmoh/test_claude/.claude/telegram"
 Environment="TERM=xterm-256color"
 ExecStart=/bin/bash -c 'exec script -q -c "claude -c --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null || exec script -q -c "claude --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null'
-Restart=always
+Restart=on-failure
 RestartSec=5
 StandardOutput=append:/home/gmoh/.claude/logs/claude-test-claude.log
 StandardError=append:/home/gmoh/.claude/logs/claude-test-claude.log
