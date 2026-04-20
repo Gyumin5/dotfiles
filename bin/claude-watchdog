@@ -1,10 +1,10 @@
 #!/bin/bash
-# claude-watchdog: enabled된 claude-* 서비스가 inactive면 자동 start.
-# trap 못 잡은 경우 (강제종료, OOM 등)에 대한 백업 안전장치.
+# claude-watchdog: enabled된 claude-* 서비스가 failed 상태면 복구.
+# 주의: "inactive"는 건드리지 않음 — 사용자 의도 stop 또는 cl() 종료 상태를 존중.
+# 크래시 복구는 systemd Restart=on-failure가 담당. 그게 소진돼 failed로 남은 경우만 watchdog이 처리.
 
 set -uo pipefail
 
-# enabled (default.target.wants에 등록된) claude-* 서비스 찾기
 for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enabled --no-legend 2>/dev/null | awk '{print $1}'); do
     # claude-watchdog 자체는 제외
     [[ "$unit" == "claude-watchdog.service" ]] && continue
@@ -13,9 +13,6 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
     if [ "$state" = "failed" ]; then
         echo "[$(date -Iseconds)] $unit failed → reset + start"
         systemctl --user reset-failed "$unit"
-        systemctl --user start "$unit"
-    elif [ "$state" = "inactive" ]; then
-        echo "[$(date -Iseconds)] $unit inactive → start"
         systemctl --user start "$unit"
     fi
 done
