@@ -25,7 +25,8 @@ except: pass
   fi
 
   # systemd 서비스가 관리 중이면: failed 자동 복구 + stop → exit 시 auto-start
-  local _svc="claude-$(basename "$PWD")"
+  # systemd unit 이름 규약상 언더스코어를 대시로 정규화
+  local _svc="claude-$(basename "$PWD" | tr '_' '-')"
   if systemctl --user list-unit-files "$_svc.service" 2>/dev/null | grep -q "$_svc"; then
     # failed 상태면 카운터 리셋 (반복 실패로 멈춰있을 수 있음)
     if systemctl --user is-failed --quiet "$_svc" 2>/dev/null; then
