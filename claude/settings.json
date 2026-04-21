@@ -109,6 +109,10 @@
           {
             "type": "command",
             "command": "/home/gmoh/.claude/hooks/lean-ctx-rewrite.sh"
+          },
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/block-ai-after-compact.sh"
           }
         ]
       }
