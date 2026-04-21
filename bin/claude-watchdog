@@ -69,8 +69,10 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
                 fi
                 # 오늘 해당 시각 epoch
                 reset_epoch=$(date -d "today ${hour}:00" +%s)
-                # 이미 지난 시각이면 내일로 (리밋은 미래 시점)
-                if [ "$reset_epoch" -lt "$now_epoch" ]; then
+                # 로그의 hit-limit 기록 시점 확인. mtime이 reset_epoch보다 미래면 이번 리셋은 내일 것.
+                # 그 외엔 모두 오늘 리셋 기준 (이미 지난 시각이어도 restart 타이밍).
+                log_mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
+                if [ "$log_mtime" -gt "$reset_epoch" ]; then
                     reset_epoch=$(( reset_epoch + 86400 ))
                 fi
 
