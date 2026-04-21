@@ -48,60 +48,6 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
     [ "$state" != "active" ] && continue
 
     # --- 2. 한도 패턴 자동 복구 비활성화 (false positive 빈번) ---
-    # 한도 걸린 세션은 사용자가 claude-sessions restart <name> 수동 복구.
-
-    # --- 3. jsonl 무응답 체크 (선택적) ---
-    wd=$(systemctl --user show "$unit" -p WorkingDirectory 2>/dev/null | cut -d= -f2)
-    [ -z "$wd" ] && continue
-    proj_key=$(echo "$wd" | sed 's|/|-|g')
-    latest_jsonl=$(ls -t "/home/gmoh/.claude/projects/${proj_key}"/*.jsonl 2>/dev/null | head -1)
-    [ -z "$latest_jsonl" ] && continue
-
-    now=$(date +%s)
-    mtime=$(stat -c %Y "$latest_jsonl" 2>/dev/null || echo 0)
-    age=$(( now - mtime ))
-
-    # 서비스가 활성인데 jsonl이 2시간 이상 안 변함 → stuck 후보
-    # 대화 중이 아닌 유휴 세션일 수도 있으니 보수적으로 6시간 기준
-    STUCK_AGE_SEC=21600  # 6h
-
-    if [ "$age" -ge "$STUCK_AGE_SEC" ]; then
-        # 최근 jsonl에 응답 대기 중인 queue-operation이 있는지 (진짜 멈춤)
-        if tail -20 "$latest_jsonl" 2>/dev/null | grep -q '"type":"queue-operation"'; then
-            # queue는 있는데 오래 응답 없음 → stuck
-            backoff_state="$STATE_DIR/${unit%.service}.backoff"
-            attempt=0
-            last_try=0
-            if [ -f "$backoff_state" ]; then
-                attempt=$(awk -F= '$1=="attempt"{print $2}' "$backoff_state")
-                last_try=$(awk -F= '$1=="last_try"{print $2}' "$backoff_state")
-                attempt="${attempt:-0}"
-                last_try="${last_try:-0}"
-            fi
-
-            # backoff 대기 중인지 확인
-            wait_min="${BACKOFF_MIN[$attempt]:-0}"
-            if [ "$attempt" -gt 0 ] && [ $(( now - last_try )) -lt $(( wait_min * 60 )) ]; then
-                log "$unit stuck 대기 중 (attempt=$attempt, ${wait_min}분 backoff)"
-                continue
-            fi
-
-            attempt=$(( attempt + 1 ))
-            if [ "$attempt" -gt "${#BACKOFF_MIN[@]}" ]; then
-                log "$unit stuck backoff 초과 → 수동 점검 필요"
-                telegram_alert "🚨 $unit stuck ${age}s. 자동 복구 포기. 수동 점검 필요."
-                rm -f "$backoff_state"
-                continue
-            fi
-
-            log "$unit stuck (jsonl ${age}s) → restart (attempt=$attempt)"
-            telegram_alert "⚠ $unit 무응답 ${age}s. 재시작 (attempt=$attempt)."
-            systemctl --user restart "$unit"
-            echo "attempt=$attempt" > "$backoff_state"
-            echo "last_try=$now" >> "$backoff_state"
-        fi
-    else
-        # 활성 응답 있음 → backoff 카운터 리셋
-        rm -f "$STATE_DIR/${unit%.service}.backoff"
-    fi
+    # --- 3. jsonl 무응답 자동 복구 비활성화 (idle 세션과 구분 불가, false positive 잦음) ---
+    # 멈춘 세션은 사용자가 claude-sessions restart <name> 수동 복구.
 done
