@@ -37,7 +37,11 @@
       "mcp__lean-ctx__ctx_semantic_search",
       "mcp__lean-ctx__ctx_response",
       "mcp__lean-ctx__ctx_agent",
-      "mcp__lean-ctx__ctx_wrapped"
+      "mcp__lean-ctx__ctx_wrapped",
+      "mcp__plugin_telegram_telegram__reply",
+      "mcp__plugin_telegram_telegram__react",
+      "mcp__plugin_telegram_telegram__edit_message",
+      "mcp__plugin_telegram_telegram__download_attachment"
     ],
     "deny": [
       "Read(**/.env*)",
