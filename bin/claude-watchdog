@@ -74,10 +74,12 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
                     reset_epoch=$(( reset_epoch + 86400 ))
                 fi
 
-                if [ "$now_epoch" -ge "$reset_epoch" ]; then
-                    # 리셋 시간 지남 → restart 한 번
+                # 리셋 직후 바로 깨우면 토큰 또 터짐 → 60초 여유 둠
+                RESET_BUFFER_SEC=60
+                if [ "$now_epoch" -ge "$(( reset_epoch + RESET_BUFFER_SEC ))" ]; then
+                    # 리셋 시간 + 여유 지남 → restart 한 번
                     if [ ! -f "$rate_state" ] || [ "$(cat "$rate_state" 2>/dev/null)" != "$reset_epoch" ]; then
-                        log "$unit rate limit reset 지남 (reset=$reset_spec) → restart"
+                        log "$unit rate limit reset+버퍼 지남 (reset=$reset_spec) → restart"
                         telegram_alert "⚠ $unit 한도 리셋 도달. 재시작 시도."
                         systemctl --user restart "$unit"
                         echo "$reset_epoch" > "$rate_state"
