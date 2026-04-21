@@ -47,9 +47,19 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
     # --- 1b. inactive는 건드리지 않음 (사용자 의도 stop 존중) ---
     [ "$state" != "active" ] && continue
 
-    # --- 2. 한도 패턴 체크 (statusline_cache.json 기반) ---
+    # --- 2. 한도 패턴 체크 (세션 jsonl 또는 log 파일 어디든 있으면) ---
     log_file="$LOG_DIR/${unit%.service}.log"
-    if [ -f "$log_file" ] && tail -200 "$log_file" 2>/dev/null | grep -q "hit your limit"; then
+    # 세션 jsonl 경로 얻기
+    _wd=$(systemctl --user show "$unit" -p WorkingDirectory 2>/dev/null | cut -d= -f2)
+    _proj_key=$(echo "$_wd" | sed 's|/|-|g')
+    _latest_jsonl=$(ls -t "/home/gmoh/.claude/projects/${_proj_key}"/*.jsonl 2>/dev/null | head -1)
+
+    hit_in_log=0
+    hit_in_jsonl=0
+    [ -f "$log_file" ] && tail -200 "$log_file" 2>/dev/null | grep -q "hit your limit" && hit_in_log=1
+    [ -n "$_latest_jsonl" ] && tail -30 "$_latest_jsonl" 2>/dev/null | grep -q "hit your limit" && hit_in_jsonl=1
+
+    if [ "$hit_in_log" = 1 ] || [ "$hit_in_jsonl" = 1 ]; then
         # 서비스 로그에 한도 흔적 있음. 실제 한도가 풀렸는지 statusline_cache.json으로 확인
         cache_file="/home/gmoh/.claude/statusline_cache.json"
         if [ -f "$cache_file" ]; then
@@ -87,8 +97,9 @@ except: print(0)
             fi
             continue
         fi
-    else
-        # 한도 걸렸던 state 파일 정리 (로그에 더 이상 패턴 없음)
+    fi
+    # 한도 흔적 없으면 state 파일 정리
+    if [ "$hit_in_log" = 0 ] && [ "$hit_in_jsonl" = 0 ]; then
         rm -f "$STATE_DIR/${unit%.service}.ratelimit"
     fi
 
