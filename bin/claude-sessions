@@ -1,0 +1,145 @@
+#!/bin/bash
+# claude-sessions: 모든 claude 세션 통합 관리 CLI.
+# Termius/SSH에서 원격 호출 가능. claude 프로세스 독립적으로 동작.
+#
+# 사용법:
+#   claude-sessions list              # 모든 세션 상태
+#   claude-sessions restart-all       # 전부 킬+재시작
+#   claude-sessions restart <name>    # 특정 세션 (unit 이름: claude-<name>)
+#   claude-sessions kill-orphans      # 고아 bun 청소
+#   claude-sessions health            # stuck 세션 감지
+
+set -uo pipefail
+
+cmd="${1:-help}"
+
+list_services() {
+    systemctl --user list-unit-files 'claude-*.service' --state=enabled --no-legend 2>/dev/null \
+        | awk '{print $1}' \
+        | grep -v '^claude-watchdog.service$'
+}
+
+cmd_list() {
+    echo "=== systemd 관리 세션 ==="
+    for svc in $(list_services); do
+        state=$(systemctl --user is-active "$svc" 2>/dev/null)
+        pid=$(systemctl --user show "$svc" -p MainPID 2>/dev/null | cut -d= -f2)
+        [ "$pid" = "0" ] && pid="-"
+        etime="-"
+        [ "$pid" != "-" ] && etime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+        printf "  %-30s %-10s PID=%-10s uptime=%s\n" "$svc" "$state" "$pid" "$etime"
+    done
+    echo ""
+    echo "=== cl 또는 수동 기동 세션 (systemd 밖) ==="
+    for p in $(pgrep -f "^claude.*remote-control" 2>/dev/null); do
+        cwd=$(readlink /proc/$p/cwd 2>/dev/null)
+        # systemd 관리 세션은 cgroup이 claude-*.service에 속함
+        cg=$(grep -oP 'user\.slice/user-\d+\.slice/user@\d+\.service/\K[^ ]+' "/proc/$p/cgroup" 2>/dev/null | head -1)
+        if [[ "$cg" != claude-*.service ]]; then
+            et=$(ps -o etime= -p "$p" | tr -d ' ')
+            printf "  PID=%-10s uptime=%-8s cwd=%s\n" "$p" "$et" "$cwd"
+        fi
+    done
+}
+
+cmd_restart() {
+    local name="${1:?usage: claude-sessions restart <name>}"
+    local svc="claude-${name}.service"
+    echo "[$(date '+%H:%M:%S')] restart $svc"
+    systemctl --user reset-failed "$svc" 2>/dev/null
+    systemctl --user restart "$svc"
+}
+
+cmd_restart_all() {
+    for svc in $(list_services); do
+        echo "[$(date '+%H:%M:%S')] restart $svc"
+        systemctl --user reset-failed "$svc" 2>/dev/null
+        systemctl --user restart "$svc" &
+    done
+    wait
+    echo "모든 세션 재시작 명령 전송 완료"
+}
+
+cmd_kill_orphans() {
+    local killed=0
+    for p in $(pgrep -af "bun server.ts" 2>/dev/null | awk '{print $1}'); do
+        ppid=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+        # parent가 systemd-user(보통 PID < 10000, /lib/systemd/systemd --user)면 고아
+        if [ -n "$ppid" ]; then
+            pcmd=$(ps -o command= -p "$ppid" 2>/dev/null)
+            if [[ "$pcmd" == *"systemd --user"* ]]; then
+                dir=$(tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep TELEGRAM_STATE_DIR | cut -d= -f2)
+                echo "orphan bun $p (dir=$dir) → kill"
+                kill -KILL "$p" 2>/dev/null
+                killed=$((killed+1))
+            fi
+        fi
+    done
+    echo "killed $killed orphan(s)"
+}
+
+cmd_health() {
+    echo "=== stuck 감지 리포트 ==="
+    for svc in $(list_services); do
+        state=$(systemctl --user is-active "$svc" 2>/dev/null)
+        [ "$state" != "active" ] && continue
+
+        # 프로젝트 경로 추출
+        wd=$(systemctl --user show "$svc" -p WorkingDirectory | cut -d= -f2)
+        proj=$(basename "$wd")
+
+        # 최근 jsonl 찾기
+        proj_dir_key=$(echo "$wd" | sed 's|/|-|g')
+        jsonl=$(ls -t "/home/gmoh/.claude/projects/${proj_dir_key}"/*.jsonl 2>/dev/null | head -1)
+        [ -z "$jsonl" ] && { echo "  $proj: jsonl 없음"; continue; }
+
+        # jsonl 최종 mtime (초 단위 경과)
+        now=$(date +%s)
+        mtime=$(stat -c %Y "$jsonl")
+        age=$(( now - mtime ))
+        age_h=$(( age / 3600 ))
+
+        # 로그에서 한도 패턴 체크
+        log="/home/gmoh/.claude/logs/${svc%.service}.log"
+        hit_limit=""
+        reset_time=""
+        if [ -f "$log" ]; then
+            if tail -200 "$log" 2>/dev/null | grep -q "hit your limit"; then
+                hit_limit="yes"
+                reset_time=$(tail -200 "$log" | grep "hit your limit" | tail -1 | grep -oP 'resets \K[0-9]+[ap]m' | head -1)
+            fi
+        fi
+
+        flag=""
+        [ "$age_h" -ge 2 ] && flag="STUCK(${age_h}h)"
+        [ -n "$hit_limit" ] && flag="${flag} RATE_LIMIT(reset=$reset_time)"
+        [ -z "$flag" ] && flag="ok"
+        printf "  %-25s age=%dh %s\n" "$proj" "$age_h" "$flag"
+    done
+}
+
+case "$cmd" in
+    list|ls)          cmd_list ;;
+    restart)          shift; cmd_restart "$@" ;;
+    restart-all)      cmd_restart_all ;;
+    kill-orphans)     cmd_kill_orphans ;;
+    health)           cmd_health ;;
+    help|-h|--help|*)
+        cat <<'HELP'
+claude-sessions <command>
+
+Commands:
+  list                   모든 세션 상태
+  restart <name>         특정 세션 재시작 (name = claude-<name>.service의 <name>)
+  restart-all            모든 enabled 세션 재시작
+  kill-orphans           고아 bun 프로세스 청소
+  health                 stuck/rate-limit 세션 감지
+  help                   이 도움말
+
+Examples:
+  claude-sessions list
+  claude-sessions restart test-claude
+  claude-sessions restart-all
+HELP
+        ;;
+esac

@@ -1,0 +1,36 @@
+#!/bin/bash
+# claude-service-template: 프로젝트 경로 주면 systemd user service 파일 stdout으로 출력.
+# Usage: claude-service-template <project-path>
+
+set -uo pipefail
+PROJECT_PATH="${1:?usage: $0 <project-path>}"
+if [ ! -d "$PROJECT_PATH" ]; then
+    echo "ERROR: $PROJECT_PATH not a directory" >&2
+    exit 1
+fi
+
+cat <<EOF
+[Unit]
+Description=Claude Code session for $(basename "$PROJECT_PATH") (telegram remote-control)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${PROJECT_PATH}
+Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="TELEGRAM_STATE_DIR=${PROJECT_PATH}/.claude/telegram"
+Environment="TERM=xterm-256color"
+ExecStart=/bin/bash -c 'exec script -q -c "claude -c --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null || exec script -q -c "claude --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null'
+ExecStartPost=/home/gmoh/.local/bin/claude-service-notify start claude-$(basename "$PROJECT_PATH" | tr '_' '-')
+ExecStopPost=/home/gmoh/.local/bin/claude-service-notify stop claude-$(basename "$PROJECT_PATH" | tr '_' '-')
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/gmoh/.claude/logs/claude-$(basename "$PROJECT_PATH" | tr '_' '-').log
+StandardError=append:/home/gmoh/.claude/logs/claude-$(basename "$PROJECT_PATH" | tr '_' '-').log
+KillMode=mixed
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
+EOF
