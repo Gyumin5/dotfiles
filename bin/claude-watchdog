@@ -54,12 +54,36 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
     _proj_key=$(echo "$_wd" | sed 's|/|-|g')
     _latest_jsonl=$(ls -t "/home/gmoh/.claude/projects/${_proj_key}"/*.jsonl 2>/dev/null | head -1)
 
-    hit_in_log=0
-    hit_in_jsonl=0
-    [ -f "$log_file" ] && tail -200 "$log_file" 2>/dev/null | grep -q "hit your limit" && hit_in_log=1
-    [ -n "$_latest_jsonl" ] && tail -30 "$_latest_jsonl" 2>/dev/null | grep -q "hit your limit" && hit_in_jsonl=1
+    # 한도 감지: jsonl에서 "가장 최근 assistant 메시지"가 hit limit인지 확인.
+    # 그 이후 assistant 응답이 있으면 이미 풀린 것으로 간주.
+    hit_latest=0
+    if [ -n "$_latest_jsonl" ]; then
+        hit_latest=$(python3 -c "
+import json, sys
+last_asst=''
+try:
+    with open('$_latest_jsonl') as f:
+        for line in f:
+            try:
+                d=json.loads(line)
+                m=d.get('message',{})
+                if m.get('role')=='assistant':
+                    c=m.get('content','')
+                    if isinstance(c,list):
+                        s=''
+                        for x in c:
+                            if isinstance(x,dict) and x.get('type')=='text':
+                                s+=x.get('text','')
+                        last_asst=s
+                    elif isinstance(c,str):
+                        last_asst=c
+            except: pass
+    print(1 if 'hit your limit' in last_asst else 0)
+except: print(0)
+" 2>/dev/null)
+    fi
 
-    if [ "$hit_in_log" = 1 ] || [ "$hit_in_jsonl" = 1 ]; then
+    if [ "${hit_latest:-0}" = "1" ]; then
         # 서비스 로그에 한도 흔적 있음. 실제 한도가 풀렸는지 statusline_cache.json으로 확인
         cache_file="/home/gmoh/.claude/statusline_cache.json"
         if [ -f "$cache_file" ]; then
@@ -98,8 +122,8 @@ except: print(0)
             continue
         fi
     fi
-    # 한도 흔적 없으면 state 파일 정리
-    if [ "$hit_in_log" = 0 ] && [ "$hit_in_jsonl" = 0 ]; then
+    # 최근 assistant가 hit limit 아니면 state 파일 정리 (이미 풀린 것)
+    if [ "${hit_latest:-0}" = "0" ]; then
         rm -f "$STATE_DIR/${unit%.service}.ratelimit"
     fi
 
