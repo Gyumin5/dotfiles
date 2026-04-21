@@ -2,6 +2,7 @@
 name: codex-ask
 description: Codex CLI로 질문 전달. "codex로/한테", "codex 의견", "codex에 물어봐", "codex로 분석/리뷰" 등 codex 키워드 포함 요청 시 자동 호출.
 disable-model-invocation: false
+effort: low
 ---
 
 # Codex CLI Integration

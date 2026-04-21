@@ -2,6 +2,7 @@
 name: ai-collaborate
 description: Gemini + Codex 병렬 협업. "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언", "다른 AI한테 물어봐", "AI한테 리뷰", "AI 토론", "합의할때까지" 등의 요청 시 자동 호출.
 disable-model-invocation: false
+effort: high
 ---
 
 # AI 병렬 협업

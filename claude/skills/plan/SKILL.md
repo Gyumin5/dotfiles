@@ -2,6 +2,7 @@
 name: plan
 description: 코드 작성 전 설계 문서 먼저 만들고 사용자 승인 후 구현. "설계", "계획", "plan", "아키텍처" 등 슬래시 호출 시.
 disable-model-invocation: true
+effort: high
 ---
 
 # /plan

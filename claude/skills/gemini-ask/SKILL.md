@@ -2,6 +2,7 @@
 name: gemini-ask
 description: Gemini CLI로 질문 전달. "gemini로/한테", "gemini 의견", "gemini에 물어봐", "gemini로 분석/리뷰" 등 gemini 키워드 포함 요청 시 자동 호출.
 disable-model-invocation: false
+effort: low
 ---
 
 # Gemini CLI Integration
