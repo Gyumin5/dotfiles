@@ -47,55 +47,49 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
     # --- 1b. inactive는 건드리지 않음 (사용자 의도 stop 존중) ---
     [ "$state" != "active" ] && continue
 
-    # --- 2. 한도 패턴 체크 ---
+    # --- 2. 한도 패턴 체크 (statusline_cache.json 기반) ---
     log_file="$LOG_DIR/${unit%.service}.log"
-    if [ -f "$log_file" ]; then
-        # 최근 200줄에 "hit your limit" 있는지
-        if tail -200 "$log_file" 2>/dev/null | grep -q "hit your limit"; then
-            # 리셋 시간 파싱: "resets 10pm (Asia/Seoul)" → 22
-            reset_spec=$(tail -200 "$log_file" | grep "hit your limit" | tail -1 | grep -oP 'resets \K[0-9]+\s*[ap]m' | head -1)
+    if [ -f "$log_file" ] && tail -200 "$log_file" 2>/dev/null | grep -q "hit your limit"; then
+        # 서비스 로그에 한도 흔적 있음. 실제 한도가 풀렸는지 statusline_cache.json으로 확인
+        cache_file="/home/gmoh/.claude/statusline_cache.json"
+        if [ -f "$cache_file" ]; then
+            rl5_pct=$(python3 -c "
+import json
+try:
+    d=json.load(open('$cache_file'))
+    p=d.get('rate_limits',{}).get('five_hour',{}).get('used_percentage',100)
+    print(p if p is not None else 100)
+except: print(100)
+" 2>/dev/null)
             rate_state="$STATE_DIR/${unit%.service}.ratelimit"
+            cur_reset=$(python3 -c "
+import json
+try:
+    d=json.load(open('$cache_file'))
+    print(d.get('rate_limits',{}).get('five_hour',{}).get('resets_at',0))
+except: print(0)
+" 2>/dev/null)
 
-            if [ -n "$reset_spec" ]; then
-                # 현재 시각 파싱
-                now_epoch=$(date +%s)
-                # reset_spec 예: "10pm" → 22시. "10am" → 10시.
-                hour=$(echo "$reset_spec" | grep -oP '[0-9]+')
-                ampm=$(echo "$reset_spec" | grep -oP '[ap]m')
-                if [ "$ampm" = "pm" ] && [ "$hour" -lt 12 ]; then
-                    hour=$((hour + 12))
-                elif [ "$ampm" = "am" ] && [ "$hour" -eq 12 ]; then
-                    hour=0
-                fi
-                # 오늘 해당 시각 epoch
-                reset_epoch=$(date -d "today ${hour}:00" +%s)
-                # 로그의 hit-limit 기록 시점 확인. mtime이 reset_epoch보다 미래면 이번 리셋은 내일 것.
-                # 그 외엔 모두 오늘 리셋 기준 (이미 지난 시각이어도 restart 타이밍).
-                log_mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo 0)
-                if [ "$log_mtime" -gt "$reset_epoch" ]; then
-                    reset_epoch=$(( reset_epoch + 86400 ))
-                fi
+            # rl5가 70% 미만 = 한도 풀림. 이번 리셋에 대해 아직 restart 안 했으면 깨움.
+            RESET_BUFFER_SEC=60
+            now_epoch=$(date +%s)
 
-                # 리셋 직후 바로 깨우면 토큰 또 터짐 → 60초 여유 둠
-                RESET_BUFFER_SEC=60
-                if [ "$now_epoch" -ge "$(( reset_epoch + RESET_BUFFER_SEC ))" ]; then
-                    # 리셋 시간 + 여유 지남 → restart 한 번
-                    if [ ! -f "$rate_state" ] || [ "$(cat "$rate_state" 2>/dev/null)" != "$reset_epoch" ]; then
-                        log "$unit rate limit reset+버퍼 지남 (reset=$reset_spec) → restart"
-                        telegram_alert "⚠ $unit 한도 리셋 도달. 재시작 시도."
-                        systemctl --user restart "$unit"
-                        echo "$reset_epoch" > "$rate_state"
-                    fi
-                else
-                    # 아직 리셋 전. 로그만
-                    log "$unit rate limited (reset=$reset_spec, $(( (reset_epoch - now_epoch)/60 ))분 후) → 대기"
+            if [ "${rl5_pct:-100}" -lt 70 ]; then
+                # 리셋 감지. 버퍼 확인: 마지막 'hit your limit' 로그 mtime + 버퍼
+                if [ ! -f "$rate_state" ] || [ "$(cat "$rate_state" 2>/dev/null)" != "$cur_reset" ]; then
+                    log "$unit 한도 리셋 감지 (rl5=${rl5_pct}%) → restart"
+                    telegram_alert "⚠ $unit 한도 리셋 도달 (5h=${rl5_pct}%). 재시작 시도."
+                    systemctl --user restart "$unit"
+                    echo "$cur_reset" > "$rate_state"
                 fi
+            else
+                log "$unit rate limited (rl5=${rl5_pct}%) → 대기"
             fi
             continue
-        else
-            # 한도 걸렸던 state 파일 정리
-            rm -f "$STATE_DIR/${unit%.service}.ratelimit"
         fi
+    else
+        # 한도 걸렸던 state 파일 정리 (로그에 더 이상 패턴 없음)
+        rm -f "$STATE_DIR/${unit%.service}.ratelimit"
     fi
 
     # --- 3. jsonl 무응답 체크 (선택적) ---
