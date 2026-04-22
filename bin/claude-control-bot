@@ -92,8 +92,7 @@ def main_menu_markup():
          {"text": "❤️ Health", "callback_data": "health"},
          {"text": "📊 Status", "callback_data": "status"}],
         [{"text": "🔄 Restart…", "callback_data": "menu:restart"}],
-        [{"text": "🔁 Restart All", "callback_data": "restart-all"},
-         {"text": "🧹 Kill Orphans", "callback_data": "kill-orphans"}],
+        [{"text": "🔁 Restart All", "callback_data": "restart-all"}],
     ]}
 
 
@@ -177,9 +176,6 @@ def handle_callback(cb):
     elif data == "restart-all":
         out = run_cs("restart-all", timeout=60)
         send_result_and_menu(chat_id, f"restart-all:\n{out}")
-    elif data == "kill-orphans":
-        out = run_cs("kill-orphans")
-        send_result_and_menu(chat_id, f"kill-orphans:\n{out}")
     elif data == "menu:main":
         show_main(chat_id, message_id)
     elif data == "menu:restart":
