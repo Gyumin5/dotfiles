@@ -88,8 +88,7 @@ def run_cs(*args, timeout=30):
 
 def main_menu_markup():
     return {"inline_keyboard": [
-        [{"text": "📋 List", "callback_data": "list"},
-         {"text": "❤️ Health", "callback_data": "health"},
+        [{"text": "❤️ Health", "callback_data": "health"},
          {"text": "📊 Status", "callback_data": "status"}],
         [{"text": "🔄 Restart…", "callback_data": "menu:restart"}],
     ]}
