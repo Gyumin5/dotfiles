@@ -17,7 +17,8 @@ cmd="${1:-help}"
 list_services() {
     systemctl --user list-unit-files 'claude-*.service' --state=enabled --no-legend 2>/dev/null \
         | awk '{print $1}' \
-        | grep -v '^claude-watchdog.service$'
+        | grep -v '^claude-watchdog.service$' \
+        | grep -v '^claude-control-bot.service$'
 }
 
 cmd_list() {
