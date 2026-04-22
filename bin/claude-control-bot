@@ -92,7 +92,6 @@ def main_menu_markup():
          {"text": "❤️ Health", "callback_data": "health"},
          {"text": "📊 Status", "callback_data": "status"}],
         [{"text": "🔄 Restart…", "callback_data": "menu:restart"}],
-        [{"text": "🔁 Restart All", "callback_data": "restart-all"}],
     ]}
 
 
@@ -126,7 +125,7 @@ def read_statusline():
 
 
 def session_menu_markup(action):
-    """action: 'restart' or 'rotate'"""
+    """action: 'restart'"""
     sessions = list_sessions()
     rows = []
     for i in range(0, len(sessions), 2):
@@ -134,6 +133,9 @@ def session_menu_markup(action):
         for name in sessions[i:i+2]:
             row.append({"text": name, "callback_data": f"{action}:{name}"})
         rows.append(row)
+    # restart 서브메뉴 맨 아래에 Restart All + Back
+    if action == "restart":
+        rows.append([{"text": "🔁 Restart All", "callback_data": "restart-all"}])
     rows.append([{"text": "⬅ Back", "callback_data": "menu:main"}])
     return {"inline_keyboard": rows}
 
