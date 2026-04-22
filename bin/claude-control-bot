@@ -118,6 +118,11 @@ def show_main(chat_id, message_id=None):
         api("sendMessage", chat_id=chat_id, text=text, reply_markup=main_menu_markup())
 
 
+def send_result_and_menu(chat_id, text):
+    """실행 결과 텍스트 + 메인 메뉴 한꺼번에 전송"""
+    api("sendMessage", chat_id=chat_id, text=text[:3500], reply_markup=main_menu_markup())
+
+
 def handle_callback(cb):
     user_id = cb.get("from", {}).get("id", 0)
     if user_id != ALLOWED_USER:
@@ -133,16 +138,16 @@ def handle_callback(cb):
 
     if data == "list":
         out = run_cs("list")
-        api("sendMessage", chat_id=chat_id, text=f"```\n{out[:3500]}\n```", parse_mode="Markdown")
+        send_result_and_menu(chat_id, f"```\n{out}\n```")
     elif data == "health":
         out = run_cs("health")
-        api("sendMessage", chat_id=chat_id, text=f"```\n{out[:3500]}\n```", parse_mode="Markdown")
+        send_result_and_menu(chat_id, f"```\n{out}\n```")
     elif data == "restart-all":
         out = run_cs("restart-all", timeout=60)
-        api("sendMessage", chat_id=chat_id, text=f"restart-all:\n{out[:3500]}")
+        send_result_and_menu(chat_id, f"restart-all:\n{out}")
     elif data == "kill-orphans":
         out = run_cs("kill-orphans")
-        api("sendMessage", chat_id=chat_id, text=f"kill-orphans:\n{out[:3500]}")
+        send_result_and_menu(chat_id, f"kill-orphans:\n{out}")
     elif data == "menu:main":
         show_main(chat_id, message_id)
     elif data == "menu:restart":
@@ -154,13 +159,13 @@ def handle_callback(cb):
     elif data.startswith("restart:"):
         name = data[len("restart:"):]
         out = run_cs("restart", name)
-        api("sendMessage", chat_id=chat_id, text=f"restart {name}:\n{out[:3500]}")
+        send_result_and_menu(chat_id, f"restart {name}:\n{out}")
     elif data.startswith("rotate:"):
         name = data[len("rotate:"):]
         out = run_cs("rotate", name)
-        api("sendMessage", chat_id=chat_id, text=f"rotate {name}:\n{out[:3500]}")
+        send_result_and_menu(chat_id, f"rotate {name}:\n{out}")
     else:
-        api("sendMessage", chat_id=chat_id, text=f"unknown: {data}")
+        send_result_and_menu(chat_id, f"unknown: {data}")
 
 
 def handle_message(msg):
@@ -176,21 +181,21 @@ def handle_message(msg):
         show_main(chat_id)
     elif text == "/list":
         out = run_cs("list")
-        api("sendMessage", chat_id=chat_id, text=f"```\n{out[:3500]}\n```", parse_mode="Markdown")
+        send_result_and_menu(chat_id, f"```\n{out}\n```")
     elif text == "/health":
         out = run_cs("health")
-        api("sendMessage", chat_id=chat_id, text=f"```\n{out[:3500]}\n```", parse_mode="Markdown")
+        send_result_and_menu(chat_id, f"```\n{out}\n```")
     elif text == "/restart_all":
         out = run_cs("restart-all", timeout=60)
-        api("sendMessage", chat_id=chat_id, text=f"restart-all:\n{out[:3500]}")
+        send_result_and_menu(chat_id, f"restart-all:\n{out}")
     elif text.startswith("/restart_"):
         name = text[len("/restart_"):].replace("_", "-")
         out = run_cs("restart", name)
-        api("sendMessage", chat_id=chat_id, text=f"restart {name}:\n{out[:3500]}")
+        send_result_and_menu(chat_id, f"restart {name}:\n{out}")
     elif text.startswith("/rotate_"):
         name = text[len("/rotate_"):].replace("_", "-")
         out = run_cs("rotate", name)
-        api("sendMessage", chat_id=chat_id, text=f"rotate {name}:\n{out[:3500]}")
+        send_result_and_menu(chat_id, f"rotate {name}:\n{out}")
     else:
         # 기본은 메뉴 표시
         show_main(chat_id)
