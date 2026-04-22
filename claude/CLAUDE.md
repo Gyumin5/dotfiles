@@ -31,6 +31,16 @@ AI 래퍼 호출 규칙 (gemini-ask / codex-ask):
 - `"$(cat file)"` 방식은 ARG_MAX 128KB 한계 있음. 큰 프롬프트면 stdin 방식 사용.
 - heredoc + `$()` 중첩 금지 (한글 quoting 깨짐 + hang 유발).
 
+## 플러그인/MCP 도입 보안 체크
+
+새 플러그인·MCP 도입 전 확인 (표면 지표만 믿지 말 것)
+- 런타임에 외부 패키지 pull 하는지 (npm/pip/curl 등)
+- 버전 핀 명시 여부 (package.json/requirements.txt 등 공개 선언)
+- 상속되는 환경변수/자격증명 (AWS, GitHub, NPM 토큰 등)
+- 의존 패키지 최신 릴리스/commit 활성도
+- 취약점(CVE) 대응 이력
+- star 수·commit 빈도는 참고만. 실제 실행되는 code path가 핵심
+
 ## 복잡도 안내
 
 판단력 필요한 작업은 `think` 붙인 프롬프트 제공. 작업량 큰 건 `/effort high` 안내. 단순 작업은 바로 실행.
