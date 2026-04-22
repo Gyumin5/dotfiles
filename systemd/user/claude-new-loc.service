@@ -9,7 +9,7 @@ WorkingDirectory=/home/gmoh/av-ros/test/new_loc
 Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="TELEGRAM_STATE_DIR=/home/gmoh/av-ros/test/new_loc/.claude/telegram"
 Environment="TERM=xterm-256color"
-ExecStart=/bin/bash -c 'exec script -q -c "claude -c --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null || exec script -q -c "claude --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null'
+ExecStart=/home/gmoh/.local/bin/claude-service-exec
 ExecStartPost=/home/gmoh/.local/bin/claude-service-notify start claude-new-loc
 ExecStopPost=/home/gmoh/.local/bin/claude-service-notify stop claude-new-loc
 Restart=on-failure

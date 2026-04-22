@@ -1,0 +1,22 @@
+#!/bin/bash
+# claude-service-exec: systemd ExecStart에서 호출. 현재 디렉토리의 jsonl 존재 여부로
+# claude -c (resume) vs claude (fresh) 자동 선택.
+
+set -uo pipefail
+
+# 프로젝트 키 생성 (cwd의 / 를 - 로 변환)
+proj_key=$(pwd | sed 's|/|-|g')
+proj_dir="$HOME/.claude/projects${proj_key}"
+
+# jsonl 존재 여부 확인
+has_jsonl=0
+if ls "$proj_dir"/*.jsonl > /dev/null 2>&1; then
+    has_jsonl=1
+fi
+
+# exec script with pty (claude --remote-control requires tty)
+if [ "$has_jsonl" = "1" ]; then
+    exec script -q -c "claude -c --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null
+else
+    exec script -q -c "claude --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null
+fi
