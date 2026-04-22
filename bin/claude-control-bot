@@ -89,12 +89,42 @@ def run_cs(*args, timeout=30):
 def main_menu_markup():
     return {"inline_keyboard": [
         [{"text": "📋 List", "callback_data": "list"},
-         {"text": "❤️ Health", "callback_data": "health"}],
+         {"text": "❤️ Health", "callback_data": "health"},
+         {"text": "📊 Status", "callback_data": "status"}],
         [{"text": "🔄 Restart…", "callback_data": "menu:restart"},
          {"text": "♻️ Rotate…", "callback_data": "menu:rotate"}],
         [{"text": "🔁 Restart All", "callback_data": "restart-all"},
          {"text": "🧹 Kill Orphans", "callback_data": "kill-orphans"}],
     ]}
+
+
+def read_statusline():
+    """~/.claude/statusline_cache.json에서 토큰 사용량/리셋 타임 읽어 문자열 반환"""
+    try:
+        path = Path.home() / ".claude" / "statusline_cache.json"
+        d = json.loads(path.read_text())
+        from datetime import datetime, timezone, timedelta
+        kst = timezone(timedelta(hours=9))
+        rl5 = d.get("rate_limits", {}).get("five_hour", {})
+        rl7 = d.get("rate_limits", {}).get("seven_day", {})
+        model = d.get("model", {}).get("display_name", "?")
+        ctx = d.get("context_window", {}).get("used_percentage", "?")
+        cost = d.get("cost", {}).get("total_cost_usd", 0)
+        rl5_pct = rl5.get("used_percentage", "?")
+        rl7_pct = rl7.get("used_percentage", "?")
+        r5 = datetime.fromtimestamp(rl5.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if rl5.get("resets_at") else "?"
+        r7 = datetime.fromtimestamp(rl7.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if rl7.get("resets_at") else "?"
+        age = int(time.time() - d.get("_cached_at", 0))
+        cwd = d.get("cwd", "?")
+        return (
+            f"{model}\n"
+            f"ctx: {ctx}% | cost: ${cost:.2f}\n"
+            f"5h: {rl5_pct}% (리셋 {r5})\n"
+            f"7d: {rl7_pct}% (리셋 {r7})\n"
+            f"cache: {age}s 전 ({cwd.split('/')[-1]})"
+        )
+    except Exception as e:
+        return f"[statusline read error] {e}"
 
 
 def session_menu_markup(action):
@@ -139,6 +169,9 @@ def handle_callback(cb):
     if data == "list":
         out = run_cs("list")
         send_result_and_menu(chat_id, f"```\n{out}\n```")
+    elif data == "status":
+        out = read_statusline()
+        send_result_and_menu(chat_id, out)
     elif data == "health":
         out = run_cs("health")
         send_result_and_menu(chat_id, f"```\n{out}\n```")
@@ -179,6 +212,9 @@ def handle_message(msg):
 
     if text in ("/start", "/menu", "menu", "메뉴"):
         show_main(chat_id)
+    elif text == "/status":
+        out = read_statusline()
+        send_result_and_menu(chat_id, out)
     elif text == "/list":
         out = run_cs("list")
         send_result_and_menu(chat_id, f"```\n{out}\n```")
@@ -206,6 +242,7 @@ def setup_commands():
     commands = [
         {"command": "menu", "description": "메인 메뉴"},
         {"command": "list", "description": "모든 세션 상태"},
+        {"command": "status", "description": "토큰 사용량/리셋 타임"},
         {"command": "health", "description": "stuck/rate-limit 감지"},
         {"command": "restart_all", "description": "모든 세션 재시작"},
     ]
