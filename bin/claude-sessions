@@ -66,25 +66,37 @@ cmd_rotate() {
     local ts=$(date +%Y%m%d-%H%M%S)
 
     echo "[$(date '+%H:%M:%S')] rotating $svc (cwd=$wd)"
-    # 1. service stop (to flush jsonl writes)
-    systemctl --user reset-failed "$svc" 2>/dev/null
-    systemctl --user stop "$svc"
-    sleep 2
 
-    # 2. move jsonl files to archive
-    local moved=0
-    for jsonl in "$proj_dir"/*.jsonl; do
-        [ -f "$jsonl" ] || continue
-        mv "$jsonl" "$archive/$(basename "$jsonl" .jsonl).${ts}.jsonl"
-        moved=$((moved+1))
-    done
-    echo "  archived $moved jsonl file(s) to $archive/"
+    # rotate 실행 주체가 해당 service cgroup 안에 있으면 stop이 자기 자신을 kill함.
+    # systemd-run --scope로 detach시켜서 실행 (caller가 죽어도 살아남음).
+    # --collect로 완료 시 자동 정리.
+    # transient scope에서 실행하면 user.slice 직속이라 claude-*.service cgroup 밖에 위치.
 
-    # 3. service start (claude -c가 jsonl 없어서 fallback으로 fresh 시작)
-    systemctl --user start "$svc"
-    sleep 2
-    local state=$(systemctl --user is-active "$svc")
-    echo "  $svc $state (fresh start)"
+    local rotate_cmd='
+set -uo pipefail
+systemctl --user reset-failed "'"$svc"'" 2>/dev/null
+systemctl --user stop "'"$svc"'"
+sleep 3
+moved=0
+for jsonl in "'"$proj_dir"'"/*.jsonl; do
+    [ -f "$jsonl" ] || continue
+    mv "$jsonl" "'"$archive"'"/$(basename "$jsonl" .jsonl).'"$ts"'.jsonl
+    moved=$((moved+1))
+done
+echo "archived $moved jsonl(s)"
+systemctl --user start "'"$svc"'"
+sleep 2
+echo "state=$(systemctl --user is-active "'"$svc"'")"
+'
+
+    # systemd-run으로 detach 실행. 현재 cgroup(claude-*.service) 밖에서 돌아감.
+    systemd-run --user --unit="cs-rotate-${name}-${ts}" --collect --quiet --scope=false \
+        /bin/bash -c "$rotate_cmd" &
+
+    disown
+    echo "  rotate 명령 detach됨. systemd-run으로 claude service cgroup 밖에서 실행 중."
+    echo "  완료 확인: systemctl --user status cs-rotate-${name}-${ts}"
+    echo "  또는 journalctl --user -u cs-rotate-${name}-${ts}"
 }
 
 cmd_restart_all() {
