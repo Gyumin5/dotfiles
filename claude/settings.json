@@ -161,6 +161,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/session-start-context.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

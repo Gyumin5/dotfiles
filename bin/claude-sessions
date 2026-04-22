@@ -6,6 +6,7 @@
 #   claude-sessions list              # 모든 세션 상태
 #   claude-sessions restart-all       # 전부 킬+재시작
 #   claude-sessions restart <name>    # 특정 세션 (unit 이름: claude-<name>)
+#   claude-sessions rotate <name>     # fresh 시작 (jsonl 아카이브로 이동, -c 없이 새 세션)
 #   claude-sessions kill-orphans      # 고아 bun 청소
 #   claude-sessions health            # stuck 세션 감지
 
@@ -48,6 +49,42 @@ cmd_restart() {
     echo "[$(date '+%H:%M:%S')] restart $svc"
     systemctl --user reset-failed "$svc" 2>/dev/null
     systemctl --user restart "$svc"
+}
+
+cmd_rotate() {
+    local name="${1:?usage: claude-sessions rotate <name>}"
+    local svc="claude-${name}.service"
+    local wd=$(systemctl --user show "$svc" -p WorkingDirectory 2>/dev/null | cut -d= -f2)
+    if [ -z "$wd" ]; then
+        echo "[rotate] $svc not found"
+        return 1
+    fi
+    local proj_key=$(echo "$wd" | sed 's|/|-|g')
+    local proj_dir="/home/gmoh/.claude/projects/${proj_key}"
+    local archive="${proj_dir}/archive"
+    mkdir -p "$archive"
+    local ts=$(date +%Y%m%d-%H%M%S)
+
+    echo "[$(date '+%H:%M:%S')] rotating $svc (cwd=$wd)"
+    # 1. service stop (to flush jsonl writes)
+    systemctl --user reset-failed "$svc" 2>/dev/null
+    systemctl --user stop "$svc"
+    sleep 2
+
+    # 2. move jsonl files to archive
+    local moved=0
+    for jsonl in "$proj_dir"/*.jsonl; do
+        [ -f "$jsonl" ] || continue
+        mv "$jsonl" "$archive/$(basename "$jsonl" .jsonl).${ts}.jsonl"
+        moved=$((moved+1))
+    done
+    echo "  archived $moved jsonl file(s) to $archive/"
+
+    # 3. service start (claude -c가 jsonl 없어서 fallback으로 fresh 시작)
+    systemctl --user start "$svc"
+    sleep 2
+    local state=$(systemctl --user is-active "$svc")
+    echo "  $svc $state (fresh start)"
 }
 
 cmd_restart_all() {
@@ -121,6 +158,7 @@ cmd_health() {
 case "$cmd" in
     list|ls)          cmd_list ;;
     restart)          shift; cmd_restart "$@" ;;
+    rotate)           shift; cmd_rotate "$@" ;;
     restart-all)      cmd_restart_all ;;
     kill-orphans)     cmd_kill_orphans ;;
     health)           cmd_health ;;
@@ -130,7 +168,9 @@ claude-sessions <command>
 
 Commands:
   list                   모든 세션 상태
-  restart <name>         특정 세션 재시작 (name = claude-<name>.service의 <name>)
+  restart <name>         특정 세션 재시작 (claude -c로 resume, 맥락 유지)
+  rotate <name>          fresh 시작 (jsonl을 archive/로 이동, 새 세션)
+                         — progress.md/history.md 잘 관리된 경우 추천
   restart-all            모든 enabled 세션 재시작
   kill-orphans           고아 bun 프로세스 청소
   health                 stuck/rate-limit 세션 감지
@@ -139,6 +179,7 @@ Commands:
 Examples:
   claude-sessions list
   claude-sessions restart test-claude
+  claude-sessions rotate test-claude
   claude-sessions restart-all
 HELP
         ;;
