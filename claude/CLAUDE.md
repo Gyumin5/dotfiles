@@ -76,6 +76,23 @@ AI 래퍼 호출 규칙 (gemini-ask / codex-ask):
 - 컨텍스트가 커지거나 한 주제가 길어지면 "progress.md에 정리할까요?" 먼저 물어보기
 - 사용자가 "압축 전 저장" 요청 시: progress.md 덮어쓰기 + history.md 누적
 
+## 세션 로테이션 (사용자 트리거)
+
+사용자가 다음 패턴 중 하나를 요청하면 이 순서로 자동 처리
+- 트리거 키워드: "저장하고 새 세션", "저장하고 rotate", "정리하고 새로", "저장하고 재시작"
+
+절차
+1. progress.md 갱신 (현재 세션의 작업 맥락 요약)
+2. history.md에 완료된 결정 이관 (append-only, 3-part 포맷)
+3. 현재 프로젝트 이름 계산: `basename $PWD | tr '_' '-'`
+4. 텔레그램으로 "저장 완료. 잠시 후 rotate" 알림 1회 전송
+5. `cs rotate <name>` 실행 (systemd-run이 detach하므로 현재 세션 죽어도 rotate 완료됨)
+
+주의
+- 트리거 키워드 정확히 매칭될 때만 rotate 실행. 애매하면 먼저 "rotate 맞나?" 확인
+- progress.md/history.md 갱신 안 하고 rotate만 호출 금지. 반드시 선 저장
+- "저장해줘"만으로는 rotate 안 함. 명시적으로 "새 세션" 또는 "rotate" 포함돼야 함
+
 ## progress.md / history.md
 
 progress.md: 작업 시 생성, 중요 변화 때 덮어쓰기, 완료 시 삭제.
