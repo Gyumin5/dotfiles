@@ -126,21 +126,26 @@ cmd_kill_orphans() {
 }
 
 cmd_health() {
-    echo "=== stuck 감지 리포트 ==="
+    echo "=== 세션 상태 ==="
     for svc in $(list_services); do
         state=$(systemctl --user is-active "$svc" 2>/dev/null)
-        [ "$state" != "active" ] && continue
-
-        # 프로젝트 경로 추출
         wd=$(systemctl --user show "$svc" -p WorkingDirectory | cut -d= -f2)
         proj=$(basename "$wd")
+
+        if [ "$state" != "active" ]; then
+            printf "  %-25s %s\n" "$proj" "⏹ 꺼짐"
+            continue
+        fi
 
         # 최근 jsonl 찾기
         proj_dir_key=$(echo "$wd" | sed 's|/|-|g')
         jsonl=$(ls -t "/home/gmoh/.claude/projects/${proj_dir_key}"/*.jsonl 2>/dev/null | head -1)
-        [ -z "$jsonl" ] && { echo "  $proj: jsonl 없음"; continue; }
 
-        # jsonl 최종 mtime (초 단위 경과)
+        if [ -z "$jsonl" ]; then
+            printf "  %-25s %s\n" "$proj" "✅ 켜짐 (새 세션)"
+            continue
+        fi
+
         now=$(date +%s)
         mtime=$(stat -c %Y "$jsonl")
         age=$(( now - mtime ))
@@ -157,11 +162,9 @@ cmd_health() {
             fi
         fi
 
-        # STUCK 플래그 제거 (false positive 많음, idle과 구분 불가)
-        flag=""
-        [ -n "$hit_limit" ] && flag="RATE_LIMIT(reset=$reset_time)"
-        [ -z "$flag" ] && flag="ok"
-        printf "  %-25s age=%dh %s\n" "$proj" "$age_h" "$flag"
+        flag="✅ 켜짐"
+        [ -n "$hit_limit" ] && flag="⚠ RATE_LIMIT(reset=$reset_time)"
+        printf "  %-25s %s  age=%dh\n" "$proj" "$flag" "$age_h"
     done
 }
 
