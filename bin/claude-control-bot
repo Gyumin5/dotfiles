@@ -124,19 +124,27 @@ def read_statusline():
 
 
 def session_menu_markup(action):
-    """action: 'restart'"""
+    """action: 'restart'. 선택 시 확인창 거침 → confirm:<action>:<name>"""
     sessions = list_sessions()
     rows = []
     for i in range(0, len(sessions), 2):
         row = []
         for name in sessions[i:i+2]:
-            row.append({"text": name, "callback_data": f"{action}:{name}"})
+            # 한번 더 확인 단계 거침
+            row.append({"text": name, "callback_data": f"confirm:{action}:{name}"})
         rows.append(row)
-    # restart 서브메뉴 맨 아래에 Restart All + Back
     if action == "restart":
-        rows.append([{"text": "🔁 Restart All", "callback_data": "restart-all"}])
+        rows.append([{"text": "🔁 Restart All", "callback_data": "confirm:restart-all"}])
     rows.append([{"text": "⬅ Back", "callback_data": "menu:main"}])
     return {"inline_keyboard": rows}
+
+
+def confirm_markup(action_data, label):
+    """확인/취소 키보드. action_data가 확정 시 실행될 callback_data."""
+    return {"inline_keyboard": [
+        [{"text": f"✅ Yes ({label})", "callback_data": action_data},
+         {"text": "❌ No", "callback_data": "menu:main"}],
+    ]}
 
 
 def show_main(chat_id, message_id=None):
@@ -177,6 +185,15 @@ def handle_callback(cb):
     elif data == "restart-all":
         out = run_cs("restart-all", timeout=60)
         send_result_and_menu(chat_id, f"restart-all:\n{out}")
+    elif data == "confirm:restart-all":
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text="⚠️ 모든 세션 재시작. 확실합니까?",
+            reply_markup=confirm_markup("restart-all", "Restart All"))
+    elif data.startswith("confirm:restart:"):
+        name = data[len("confirm:restart:"):]
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text=f"⚠️ {name} 재시작. 확실합니까?",
+            reply_markup=confirm_markup(f"restart:{name}", f"Restart {name}"))
     elif data == "menu:main":
         show_main(chat_id, message_id)
     elif data == "menu:restart":
