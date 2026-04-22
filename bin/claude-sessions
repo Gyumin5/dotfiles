@@ -90,10 +90,8 @@ echo "state=$(systemctl --user is-active "'"$svc"'")"
 '
 
     # systemd-run으로 detach 실행. 현재 cgroup(claude-*.service) 밖에서 돌아감.
-    systemd-run --user --unit="cs-rotate-${name}-${ts}" --collect --quiet --scope=false \
-        /bin/bash -c "$rotate_cmd" &
-
-    disown
+    systemd-run --user --unit="cs-rotate-${name}-${ts}" --collect --quiet \
+        /bin/bash -c "$rotate_cmd"
     echo "  rotate 명령 detach됨. systemd-run으로 claude service cgroup 밖에서 실행 중."
     echo "  완료 확인: systemctl --user status cs-rotate-${name}-${ts}"
     echo "  또는 journalctl --user -u cs-rotate-${name}-${ts}"
@@ -159,9 +157,9 @@ cmd_health() {
             fi
         fi
 
+        # STUCK 플래그 제거 (false positive 많음, idle과 구분 불가)
         flag=""
-        [ "$age_h" -ge 2 ] && flag="STUCK(${age_h}h)"
-        [ -n "$hit_limit" ] && flag="${flag} RATE_LIMIT(reset=$reset_time)"
+        [ -n "$hit_limit" ] && flag="RATE_LIMIT(reset=$reset_time)"
         [ -z "$flag" ] && flag="ok"
         printf "  %-25s age=%dh %s\n" "$proj" "$age_h" "$flag"
     done
