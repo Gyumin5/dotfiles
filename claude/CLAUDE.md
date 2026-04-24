@@ -67,6 +67,7 @@ AI 래퍼 호출 규칙 (gemini-ask / codex-ask):
 
 - HTML 열기: `google-chrome` (xdg-open 금지)
 - 경로 미지정 시 현재 프로젝트 내에서만 검색
+- 텔레그램 채널(<channel source="plugin:telegram:telegram">)로 들어온 메시지에는 반드시 mcp__plugin_telegram_telegram__reply 도구로 답할 것. 텍스트 응답만 하면 사용자는 못 봄. transcript 텍스트는 보조 수단일 뿐.
 - 텔레그램 reply 후 터미널 확인 출력 금지
 - 텔레그램으로 명령어 보낼 때 백틱/코드펜스/들여쓰기 금지. 평문으로 한 줄씩, 앞 공백 없이. 복붙 가능하게. 터미널 `! ` 접두사는 Claude Code 안에서 돌릴 때만 명시하고 기본은 생략.
 - Bash 영구 블로킹 명령 금지: `tail -f`, `watch`, `sleep` 무한대, vim/nano 등 인터랙티브 에디터, `git commit` (메시지 없이), `docker run -it`, 네트워크 리스너(nc/socat). 긴 모니터링은 `run_in_background` + 주기적 상태 파일 확인으로 대체.
