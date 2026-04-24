@@ -75,8 +75,8 @@ filter_sessions() {
             echo "$f"
         else
             scwd=$(get_session_cwd "$f")
-            # Match if session cwd starts with current dir or vice versa, or if empty
-            if [ -z "$scwd" ] || [ "$scwd" = "$CUR_DIR" ] || [[ "$scwd" == "$CUR_DIR"/* ]] || [[ "$CUR_DIR" == "$scwd"/* ]]; then
+            # 정확히 같은 cwd만 매치. prefix/빈 cwd 매치는 부모 세션이 하위 경로에 leak되어 오염 유발 → 제거
+            if [ "$scwd" = "$CUR_DIR" ]; then
                 echo "$f"
             fi
         fi
