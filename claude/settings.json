@@ -133,16 +133,6 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/gmoh/.claude/hooks/precompact-guard.sh"
-          }
-        ]
-      }
-    ],
     "PostCompact": [
       {
         "hooks": [

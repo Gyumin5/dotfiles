@@ -90,8 +90,86 @@ def main_menu_markup():
     return {"inline_keyboard": [
         [{"text": "❤️ Health", "callback_data": "health"},
          {"text": "📊 Status", "callback_data": "status"}],
-        [{"text": "🔄 Restart…", "callback_data": "menu:restart"}],
+        [{"text": "📜 Recent…", "callback_data": "menu:recent"},
+         {"text": "🔄 Restart…", "callback_data": "menu:restart"}],
     ]}
+
+
+def service_workdir(name):
+    """claude-<name>.service의 WorkingDirectory 읽기"""
+    try:
+        out = subprocess.check_output(
+            ["systemctl", "--user", "show", f"claude-{name}.service", "-p", "WorkingDirectory", "--value"],
+            text=True, timeout=5,
+        ).strip()
+        return out or None
+    except Exception:
+        return None
+
+
+def project_key(workdir):
+    """cwd → ~/.claude/projects/<key> 변환 (/를 -로)"""
+    return workdir.replace("/", "-")
+
+
+def read_recent(name, max_turns=6, max_chars=3000):
+    """세션의 최신 jsonl에서 마지막 user/assistant 텍스트 메시지 추출"""
+    wd = service_workdir(name)
+    if not wd:
+        return f"[{name}] WorkingDirectory 못 찾음"
+    proj = Path.home() / ".claude" / "projects" / project_key(wd).lstrip("-")
+    proj = Path(f"{Path.home()}/.claude/projects/{project_key(wd)}")
+    jsonls = sorted(proj.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not jsonls:
+        return f"[{name}] jsonl 없음 (proj={proj})"
+    latest = jsonls[0]
+    age = int(time.time() - latest.stat().st_mtime)
+    # tail 200 lines
+    try:
+        with latest.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 400_000))
+            raw = f.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        return f"[{name}] read error: {e}"
+
+    turns = []
+    for line in raw.splitlines():
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        t = d.get("type")
+        ts = (d.get("timestamp", "") or "")[:19]
+        msg = d.get("message", {}) or {}
+        if t == "user":
+            c = msg.get("content", "")
+            if isinstance(c, str) and c.strip():
+                turns.append(("U", ts, c.strip()))
+        elif t == "assistant":
+            c = msg.get("content", [])
+            if isinstance(c, list):
+                for item in c:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        txt = (item.get("text") or "").strip()
+                        if txt:
+                            turns.append(("A", ts, txt))
+
+    turns = turns[-max_turns:]
+    if not turns:
+        return f"[{name}] 텍스트 턴 없음 (tool_use만?)\n마지막 활동: {age}s 전"
+
+    lines = [f"[{name}] 마지막 활동: {age}s 전"]
+    for role, ts, txt in turns:
+        # 텔레그램 채널 태그 제거 간소화
+        if "<channel " in txt:
+            import re
+            txt = re.sub(r"<channel [^>]+>", "", txt).replace("</channel>", "").strip()
+        lines.append(f"\n{role}[{ts}]:\n{txt[:500]}")
+
+    result = "\n".join(lines)
+    return result[:max_chars]
 
 
 def read_statusline():
@@ -124,14 +202,16 @@ def read_statusline():
 
 
 def session_menu_markup(action):
-    """action: 'restart'. 선택 시 확인창 거침 → confirm:<action>:<name>"""
+    """action: 'restart' (confirm 거침) 또는 'recent' (바로 실행)"""
     sessions = list_sessions()
     rows = []
     for i in range(0, len(sessions), 2):
         row = []
         for name in sessions[i:i+2]:
-            # 한번 더 확인 단계 거침
-            row.append({"text": name, "callback_data": f"confirm:{action}:{name}"})
+            if action == "restart":
+                row.append({"text": name, "callback_data": f"confirm:{action}:{name}"})
+            else:
+                row.append({"text": name, "callback_data": f"{action}:{name}"})
         rows.append(row)
     if action == "restart":
         rows.append([{"text": "🔁 Restart All", "callback_data": "confirm:restart-all"}])
@@ -199,6 +279,13 @@ def handle_callback(cb):
     elif data == "menu:restart":
         api("editMessageText", chat_id=chat_id, message_id=message_id,
             text="Restart할 세션 선택:", reply_markup=session_menu_markup("restart"))
+    elif data == "menu:recent":
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text="최신 대화 볼 세션 선택:", reply_markup=session_menu_markup("recent"))
+    elif data.startswith("recent:"):
+        name = data[len("recent:"):]
+        out = read_recent(name)
+        send_result_and_menu(chat_id, out)
     elif data.startswith("restart:"):
         name = data[len("restart:"):]
         out = run_cs("restart", name)
