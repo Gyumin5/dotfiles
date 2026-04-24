@@ -47,9 +47,36 @@ cmd_list() {
 cmd_restart() {
     local name="${1:?usage: claude-sessions restart <name>}"
     local svc="claude-${name}.service"
-    echo "[$(date '+%H:%M:%S')] restart $svc"
-    systemctl --user reset-failed "$svc" 2>/dev/null
-    systemctl --user restart "$svc"
+    local wd=$(systemctl --user show "$svc" -p WorkingDirectory --value 2>/dev/null)
+    local bot_pid_path="${wd}/.claude/telegram/bot.pid"
+    local need_bot=0
+    [ -d "${wd}/.claude/telegram" ] && need_bot=1
+
+    for attempt in 1 2 3; do
+        echo "[$(date '+%H:%M:%S')] restart $svc (attempt $attempt)"
+        systemctl --user reset-failed "$svc" 2>/dev/null
+        systemctl --user restart "$svc"
+
+        if [ "$need_bot" = "0" ]; then
+            return 0
+        fi
+
+        # 봇 spawn 확인 (최대 8s 대기)
+        for i in 1 2 3 4 5 6 7 8; do
+            sleep 1
+            if [ -f "$bot_pid_path" ]; then
+                # bot.pid는 stop 시 안 지워질 수 있음. 실제 PID 살아있는지 확인
+                local pid=$(cat "$bot_pid_path" 2>/dev/null)
+                if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                    echo "  ✅ telegram bot alive (pid=$pid)"
+                    return 0
+                fi
+            fi
+        done
+        echo "  ⚠ telegram bot not detected after 8s, retrying..."
+    done
+    echo "  ❌ telegram bot still not up after 3 attempts"
+    return 1
 }
 
 cmd_rotate() {
