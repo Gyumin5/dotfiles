@@ -6,6 +6,7 @@
     "ENABLE_PROMPT_CACHING_1H": "1"
   },
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "Bash(*)",
       "Read",
