@@ -108,8 +108,8 @@ def service_workdir(name):
 
 
 def project_key(workdir):
-    """cwd → ~/.claude/projects/<key> 변환 (/를 -로)"""
-    return workdir.replace("/", "-")
+    """cwd → ~/.claude/projects/<key> 변환 (/와 _ 를 -로). Claude Code 명명 규칙과 일치."""
+    return workdir.replace("/", "-").replace("_", "-")
 
 
 def read_recent(name, max_turns=6, max_chars=3000):
@@ -117,7 +117,6 @@ def read_recent(name, max_turns=6, max_chars=3000):
     wd = service_workdir(name)
     if not wd:
         return f"[{name}] WorkingDirectory 못 찾음"
-    proj = Path.home() / ".claude" / "projects" / project_key(wd).lstrip("-")
     proj = Path(f"{Path.home()}/.claude/projects/{project_key(wd)}")
     jsonls = sorted(proj.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not jsonls:

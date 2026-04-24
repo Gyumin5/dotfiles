@@ -4,9 +4,9 @@
 
 set -uo pipefail
 
-# 프로젝트 키 생성 (cwd의 / 를 - 로 변환)
-proj_key=$(pwd | sed 's|/|-|g')
-proj_dir="$HOME/.claude/projects${proj_key}"
+# 프로젝트 키 생성: cwd의 / 와 _ 를 - 로 변환 (Claude Code 디렉토리 명명 규칙과 일치)
+proj_key=$(pwd | sed -e 's|/|-|g' -e 's|_|-|g')
+proj_dir="$HOME/.claude/projects/${proj_key}"
 
 # jsonl 존재 여부 확인
 has_jsonl=0
