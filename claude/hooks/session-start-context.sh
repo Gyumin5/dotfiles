@@ -34,7 +34,7 @@ if [ "$CWD" = "/home/gmoh/test_claude" ]; then
         [ "$age" -gt 518400 ] && need_register=1
     fi
     if [ "$need_register" = "1" ]; then
-        parts+="\n## 작업 요청\n\n매일 아침 Claude Code 개선 리서치 cron이 만료됐거나 등록되지 않음. CronCreate 도구로 다음 작업 등록해줘:\n- cron: 0 9 * * * (매일 09:00 KST)\n- recurring: true, durable: true\n- prompt: WebSearch 최근 7일 Claude Code/Agent SDK 신기능 3-5개 → codex-ask + gemini-ask 병렬 평가 → 도입/보류/스킵 + 난이도 → mcp__plugin_telegram_telegram__reply로 chat_id 8689118207에 한국어 평문 전송\n등록 완료 후 'touch $MARK' 실행해서 다음 6일간 재요청 안 뜨도록 표시.\n"
+        parts+="\n## 작업 요청\n\n매일 아침 Claude Code 개선 리서치 cron이 만료됐거나 등록되지 않음. CronCreate 도구로 다음 작업 등록해줘:\n- cron: 0 9 * * * (매일 09:00 KST)\n- recurring: true, durable: true\n- prompt: (0) ~/.local/share/claude/versions 최신 vs ~/.local/bin/claude 심링크 비교 → 신규 버전 있으면 알림 한 줄 (1) WebSearch 최근 7일 Claude Code/Agent SDK 신기능 3-5개 (2) codex-ask + gemini-ask --new --topic 병렬 평가 (3) 도입/보류/스킵 + 난이도 (4) 한국어 평문, 0번 알림은 맨앞 (5) mcp__plugin_telegram_telegram__reply로 chat_id 8689118207에 전송\n등록 완료 후 'touch $MARK' 실행해서 다음 6일간 재요청 안 뜨도록 표시.\n"
     fi
 fi
 
