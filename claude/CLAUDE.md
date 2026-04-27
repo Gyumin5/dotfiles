@@ -77,6 +77,7 @@ AI 래퍼 호출 규칙 (gemini-ask / codex-ask):
 - 텔레그램 채널(<channel source="plugin:telegram:telegram">)로 들어온 메시지에는 반드시 mcp__plugin_telegram_telegram__reply 도구로 답할 것. 텍스트 응답만 하면 사용자는 못 봄. transcript 텍스트는 보조 수단일 뿐.
 - 텔레그램 reply 후 터미널 확인 출력 금지
 - 텔레그램으로 명령어 보낼 때 백틱/코드펜스/들여쓰기 금지. 평문으로 한 줄씩, 앞 공백 없이. 복붙 가능하게. 터미널 `! ` 접두사는 Claude Code 안에서 돌릴 때만 명시하고 기본은 생략.
+- sudo 호출 절대 금지. systemd 서비스로 돌아가는 세션은 stdin이 없어 sudo가 패스워드 프롬프트에서 무한 대기 → 세션 데드락. 필요하면 사용자에게 평문 명령(앞 ! 없이)으로 알려주고 사용자가 터미널에서 실행. 권한 우회용 다른 패턴(pkexec, su, doas)도 동일 적용.
 - Bash 영구 블로킹 명령 금지: `tail -f`, `watch`, `sleep` 무한대, vim/nano 등 인터랙티브 에디터, `git commit` (메시지 없이), `docker run -it`, 네트워크 리스너(nc/socat). 긴 모니터링은 `run_in_background` + 주기적 상태 파일 확인으로 대체.
 - 오래 걸릴 수 있는 bash 명령(빌드, 학습, 실험 스크립트, 큰 테스트, 다운로드, 원격 동기화 등)은 항상 `run_in_background=true`로 실행. 포그라운드 block 금지 — 텔레그램 응답 중단 → 세션 stuck 원인. 확실치 않으면 백그라운드 우선. 짧은 명령(<30s)만 foreground.
 - 완료·통과·정상 선언 전에 해당 검증 명령(테스트/빌드/lint/재현) 실행하고 출력 확인. 출력 없이 "동작할 것 같다"로 선언 금지.
