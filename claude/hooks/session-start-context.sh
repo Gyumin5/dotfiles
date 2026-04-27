@@ -9,17 +9,23 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 [ -z "$CWD" ] && CWD="$PWD"
 
 PROG="$CWD/progress.md"
+ACTIVE="$CWD/history/active.md"
 HIST="$CWD/history.md"
 
 parts=""
 if [ -f "$PROG" ]; then
-    # 너무 길면 자름 (최대 8000 chars)
+    # progress는 hard limit 120줄이라 통째 주입 가능
     pcontent=$(head -c 8000 "$PROG")
     parts+="## progress.md (현재 진행 상황)\n\n${pcontent}\n\n"
 fi
-if [ -f "$HIST" ]; then
-    hcontent=$(tail -c 8000 "$HIST")
-    parts+="## history.md (최근 결정 로그)\n\n${hcontent}\n"
+# 우선순위: history/active.md (compact view) > history.md tail (fallback)
+if [ -f "$ACTIVE" ]; then
+    acontent=$(head -c 6000 "$ACTIVE")
+    parts+="## history/active.md (현재 유효한 결정)\n\n${acontent}\n\n"
+    parts+="(전체 결정 로그는 history.md / history/YYYY-MM.md 에서 lazy load)\n"
+elif [ -f "$HIST" ]; then
+    hcontent=$(tail -c 4000 "$HIST")
+    parts+="## history.md (최근 결정 로그 — active.md 없음)\n\n${hcontent}\n"
 fi
 
 [ -z "$parts" ] && exit 0

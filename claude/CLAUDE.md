@@ -107,38 +107,59 @@ AI 래퍼 호출 규칙 (gemini-ask / codex-ask):
 
 ## progress.md / history.md
 
-progress.md: 작업 시 생성, 중요 변화 때 덮어쓰기, 완료 시 삭제.
+역할 분리 (엄격)
+- progress.md = 재개용 실행 상태 (현재 세션이 어디까지 했고 다음 행동이 뭐고 무엇이 막혀있나)
+- history.md = 되돌아볼 가치가 있는 결정의 감사 로그
+- 두 파일이 같은 정보 중복하면 안 됨. 결정은 history, 진행 상태는 progress.
 
-업데이트 트리거 (중요도 기반)
-- 즉시: 방향/범위 변경, 결정 번복, 새 제약 등장, 작업 단위 완료
-- 정기: 주제 전환 시
-- 안 함: 단순 Q&A, 중간 디버깅, 매 메시지
+progress.md
+- 위치: 프로젝트 루트
+- hard limit 120줄. 80줄 넘으면 압축
+- status 필드 필수: active / paused / abandoned / handoff
+- 업데이트 트리거: 방향·범위 변경, 결정 번복, 새 제약, 작업 단위 완료, 주제 전환. 단순 Q&A·중간 디버깅·매 메시지 안 함
+- 종료 처리:
+  - active 끝 → 결정 history 이관 + progress 삭제
+  - paused → progress 유지, status 갱신
+  - abandoned → 폐기 사유 history 기록 + progress 삭제
+  - handoff → progress 갱신만
+- 형식
+  ```
+  # progress.md
+  updated: YYYY-MM-DD HH:MM KST
+  status: active
+  task: <한 줄>
 
-청소 규칙
-- 완료 항목은 progress에서 빼고 history.md로 이관
-- 며칠 안 움직이는 "진행 중" 항목은 상태 재검토 (포기/연기/계속)
-- 작업 전체 끝 → progress.md 삭제
+  ## Goal
+  ## Current State
+  ## Decisions In Force
+  ## Resume Hints
+  ## Blockers
+  ## Do Not Repeat
+  ```
 
-한 줄 원칙: 중요한 변화는 즉시 기록, 잡음은 흘리고, 완료된 건 history로 이관, 빈 progress는 지운다.
+history.md
+- append-only 결정 로그. 경량 ADR (Y-statement 영감)
+- 포맷
+  ```
+  ## [YYYY-MM-DD] #NN <한 줄 요약>
+  tags: 주제1, 주제2
+  - 결정: (필수)
+  - 근거: (필수, 한 줄)
+  - 되돌릴 조건: (있으면)
+  - 실험/실패: (다시 시도 시 시간 낭비인 경우만)
+  ```
+- 규칙
+  - 결정 + 근거는 짝. "결정"만 있는 항목 금지
+  - 실패는 모두 남기지 말 것. "다시 시도하면 시간 낭비하는 실패"만 negative decision으로 기록
+  - 항목당 3~6줄, 태그 1~3개
+  - 정정은 supersedes 체인 (`supersedes: YYYY-MM-DD/#NN`)
+  - 크기 관리: 루트 최근 20항목 또는 200줄. 초과 시 history/YYYY-MM.md로 월별 archive
 
-history.md: append-only 결정 로그. ADR 원칙 참고.
-
-포맷
-```
-## [YYYY-MM-DD] #NN
-tags: 주제1, 주제2
-- 결정: (필수)
-- 실험: (있을 때만)
-- 다음: (있을 때만)
-```
-
-규칙
-- 결정만 필수. 실험/다음은 있을 때만 (빈 칸 생략)
-- 항목당 3~6줄 제한. 태그 1~3개로 검색성 확보
-- progress → history 이관 시 압축: 최종 결정 / 실패 원인 / 재개 힌트만. 상태 업데이트·반복 시도는 버리거나 묶기. 원문 복사 금지
-- 정정: 원본 수정 금지. 새 항목 + 첫 줄에 `supersedes: YYYY-MM-DD/#NN`로 체인
-- 크기 관리: 루트는 최근 30일만. 500줄/50항목 초과 시 history/YYYY-MM.md로 월별 아카이브
-- 인덱스(선택): history/index.md에 "태그 → 최근 결정 링크"만
+history/active.md (SessionStart 주입 대상)
+- 현재 유효한 결정 10~20개 + 항상 적용되는 제약을 compact view로 유지
+- append-only 아님. 결정 폐기/수정 시 갱신
+- SessionStart 훅은 progress.md + history/active.md만 주입. 본 history.md / 월별 archive는 lazy load (필요 시 read/grep)
+- active.md 없으면 훅이 history.md 마지막 일부로 fallback
 
 ## lean-ctx 부가
 
