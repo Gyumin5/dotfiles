@@ -42,7 +42,7 @@ EOF
 )
 
 log "start"
-OUTPUT=$(timeout 900 claude -p "$PROMPT" 2>> "$LOG_FILE") || true
+OUTPUT=$(timeout 900 claude --bare -p "$PROMPT" 2>> "$LOG_FILE") || true
 log "claude exit. length=${#OUTPUT}"
 
 if [ -z "$OUTPUT" ]; then
@@ -61,11 +61,11 @@ echo "$OUTPUT" > "$OUT_FILE"
 
 # 2차 호출: 1차 후보를 입력으로 "이번 주 도입 추천 1건 + 이유 + 적용 단계" 분석
 log "stage2 start"
-STAGE2_PROMPT="아래는 오늘 Claude Code 개선 리서치 1차 결과(후보 3~5건). 이번 주에 실제 도입할 1건만 골라서 추천 사유, 충돌 가능성, 적용 단계 3~5줄, 롤백 계획을 평문으로 정리해. 백틱/코드펜스/굵게 금지. 서론 금지. 추천 1건이 아니라 모두 보류가 맞으면 '이번 주 도입 추천 없음' 한 줄과 그 사유만.
+STAGE2_PROMPT="아래는 오늘 Claude Code 개선 리서치 1차 결과(후보 3~5건). 오늘 실제 도입할 1건만 골라서 추천 사유, 충돌 가능성, 적용 단계 3~5줄, 롤백 계획을 평문으로 정리해. 백틱/코드펜스/굵게 금지. 서론 금지. 추천 1건이 아니라 모두 보류가 맞으면 '오늘 도입 추천 없음' 한 줄과 그 사유만. 매일 돌아가는 브리핑이니 '이번 주', '주간' 같은 단위 표현은 쓰지 말 것.
 
 ---
 $OUTPUT"
-STAGE2=$(timeout 600 claude -p "$STAGE2_PROMPT" 2>> "$LOG_FILE") || true
+STAGE2=$(timeout 600 claude --bare -p "$STAGE2_PROMPT" 2>> "$LOG_FILE") || true
 log "stage2 exit. length=${#STAGE2}"
 
 if [ ${#STAGE2} -lt 50 ] \
