@@ -131,6 +131,24 @@
             "command": "/home/gmoh/.claude/hooks/auto-verify.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/tool-latency.sh"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/precompact-guard.sh"
+          }
+        ]
       }
     ],
     "PostCompact": [
