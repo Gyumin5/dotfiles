@@ -1,0 +1,137 @@
+#!/bin/bash
+# claude-progress-updater: 세션 transcript jsonl을 분석해 progress.md/history.md 자동 갱신.
+# 메인 세션 블로킹 없이 헤드리스 claude -p로 차분 요약 생성.
+#
+# 사용:
+#   claude-progress-updater <project-cwd>
+#   예: claude-progress-updater /home/gmoh/test_claude
+#
+# 동작:
+#   1. cwd → claude project key (/와 _ 를 -로) → transcript jsonl 위치 결정
+#   2. 가장 최신 jsonl의 last-processed offset (state file) 이후 entries 추출
+#   3. 기존 progress.md/history.md + 새 entries → claude -p로 갱신본 생성
+#   4. atomic replace progress.md + append history.md
+#   5. offset 갱신
+
+set -uo pipefail
+
+CWD="${1:?usage: claude-progress-updater <project-cwd>}"
+[ -d "$CWD" ] || { echo "[updater] cwd $CWD not found" >&2; exit 1; }
+
+export NVM_DIR="$HOME/.nvm"
+set +u; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; set -u
+export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+
+LOG_DIR="$HOME/.claude/logs"
+STATE_DIR="$HOME/.claude/state/progress-updater"
+mkdir -p "$LOG_DIR" "$STATE_DIR"
+
+PROJ_KEY=$(echo "$CWD" | sed -e 's|/|-|g' -e 's|_|-|g')
+PROJ_DIR="$HOME/.claude/projects/${PROJ_KEY}"
+[ -d "$PROJ_DIR" ] || { echo "[updater] proj dir $PROJ_DIR not found" >&2; exit 1; }
+
+LATEST_JSONL=$(ls -t "$PROJ_DIR"/*.jsonl 2>/dev/null | head -1)
+[ -z "$LATEST_JSONL" ] && { echo "[updater] no jsonl in $PROJ_DIR" >&2; exit 0; }
+
+STATE_FILE="$STATE_DIR/$(basename "$CWD").state"
+LOG_FILE="$LOG_DIR/progress-updater.log"
+
+log() { echo "[$(date -Iseconds)] [$(basename "$CWD")] $1" >> "$LOG_FILE"; }
+
+# 마지막 처리 offset 읽기 (jsonl line count)
+last_offset=0
+[ -f "$STATE_FILE" ] && last_offset=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
+
+cur_lines=$(wc -l < "$LATEST_JSONL" 2>/dev/null || echo 0)
+new_lines=$(( cur_lines - last_offset ))
+
+if [ "$new_lines" -le 0 ]; then
+    log "no new entries (offset=$last_offset, cur=$cur_lines)"
+    exit 0
+fi
+
+# 새 entries 추출 (text turns만, 너무 길면 자르기)
+DIFF_FILE=$(mktemp)
+trap 'rm -f "$DIFF_FILE"' EXIT
+tail -n "$new_lines" "$LATEST_JSONL" | python3 -c "
+import json, sys
+for line in sys.stdin:
+    try:
+        d = json.loads(line)
+    except:
+        continue
+    t = d.get('type', '')
+    ts = (d.get('timestamp', '') or '')[:19]
+    msg = d.get('message', {}) or {}
+    if t == 'user':
+        c = msg.get('content', '')
+        if isinstance(c, str) and c.strip() and not c.startswith('<system-reminder>'):
+            print(f'U[{ts}] {c[:500]}')
+    elif t == 'assistant':
+        c = msg.get('content', [])
+        if isinstance(c, list):
+            for it in c:
+                if isinstance(it, dict):
+                    if it.get('type') == 'text':
+                        x = (it.get('text') or '').strip()
+                        if x:
+                            print(f'A[{ts}] {x[:500]}')
+                    elif it.get('type') == 'tool_use':
+                        print(f'A[{ts}] [tool:{it.get(\"name\",\"?\")}]')
+" > "$DIFF_FILE"
+
+diff_size=$(wc -c < "$DIFF_FILE")
+if [ "$diff_size" -lt 200 ]; then
+    log "diff too small ($diff_size bytes), skip"
+    echo "$cur_lines" > "$STATE_FILE"
+    exit 0
+fi
+
+# diff 너무 크면 잘라서 (claude -p input 한계)
+if [ "$diff_size" -gt 30000 ]; then
+    head -c 30000 "$DIFF_FILE" > "${DIFF_FILE}.trim"
+    mv "${DIFF_FILE}.trim" "$DIFF_FILE"
+    log "diff trimmed to 30KB"
+fi
+
+PROG="$CWD/progress.md"
+HIST="$CWD/history.md"
+
+# 기존 progress.md (없으면 빈 템플릿)
+existing_prog=""
+[ -f "$PROG" ] && existing_prog=$(head -c 8000 "$PROG")
+
+# claude -p로 progress.md 갱신본 + history.md 새 entry 생성
+PROMPT=$(cat <<EOF
+다음은 진행 중인 작업의 transcript 요약과 기존 progress.md다. 새 entries를 반영해서 progress.md를 갱신해라.
+
+## 기존 progress.md
+$existing_prog
+
+## 새 transcript (마지막 처리 후 추가분)
+$(cat "$DIFF_FILE")
+
+## 작업
+1. 기존 progress.md 위에 새 entries에서 의미있는 결정/방향 변경/작업 완료/블로커만 반영해서 갱신본 작성
+2. 잡담, 단순 Q&A, 중간 디버깅 무시
+3. 형식 유지: # 진행 상황 (YYYY-MM-DD), ## 완성된 시스템 개요, ## 현재 상태, ## 다음 작업 등
+4. 출력은 갱신된 progress.md 전문 ONLY. 마크다운 코드펜스(\`\`\`) 금지. 서론/메타 멘트 금지.
+EOF
+)
+
+log "calling claude -p (diff=$diff_size bytes, prog=${#existing_prog} bytes)"
+NEW_PROG=$(timeout 300 claude -p "$PROMPT" 2>> "$LOG_FILE")
+
+if [ -z "$NEW_PROG" ] || [ "${#NEW_PROG}" -lt 100 ]; then
+    log "claude returned empty/short response, skip"
+    exit 0
+fi
+
+# atomic replace
+echo "$NEW_PROG" > "$PROG.tmp" && mv "$PROG.tmp" "$PROG"
+log "progress.md updated (${#NEW_PROG} bytes)"
+
+# offset 갱신
+echo "$cur_lines" > "$STATE_FILE"
+
+exit 0

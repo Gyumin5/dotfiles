@@ -1,0 +1,9 @@
+[Unit]
+Description=Claude Progress Updater (test_claude)
+
+[Service]
+Type=oneshot
+Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/gmoh/.local/bin/claude-progress-updater /home/gmoh/test_claude
+StandardOutput=append:/home/gmoh/.claude/logs/progress-updater.svc.log
+StandardError=append:/home/gmoh/.claude/logs/progress-updater.svc.log
