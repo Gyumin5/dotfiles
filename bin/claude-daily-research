@@ -58,8 +58,34 @@ if [ ${#OUTPUT} -lt 200 ] \
 fi
 
 echo "$OUTPUT" > "$OUT_FILE"
-# test_claude 세션이 다음 메시지 처리 시 inject할 archive에 저장
-echo "$OUTPUT" > "$BRIEFING_FILE"
+
+# 2차 호출: 1차 후보를 입력으로 "이번 주 도입 추천 1건 + 이유 + 적용 단계" 분석
+log "stage2 start"
+STAGE2_PROMPT="아래는 오늘 Claude Code 개선 리서치 1차 결과(후보 3~5건). 이번 주에 실제 도입할 1건만 골라서 추천 사유, 충돌 가능성, 적용 단계 3~5줄, 롤백 계획을 평문으로 정리해. 백틱/코드펜스/굵게 금지. 서론 금지. 추천 1건이 아니라 모두 보류가 맞으면 '이번 주 도입 추천 없음' 한 줄과 그 사유만.
+
+---
+$OUTPUT"
+STAGE2=$(timeout 600 claude -p "$STAGE2_PROMPT" 2>> "$LOG_FILE") || true
+log "stage2 exit. length=${#STAGE2}"
+
+if [ ${#STAGE2} -lt 50 ] \
+    || echo "$STAGE2" | grep -qE "대기 루프|hit your limit|limit · resets|usage limit"; then
+    log "stage2 ABORT: 한도/무의미 응답 (length=${#STAGE2}). 1차 결과만 사용."
+    STAGE2=""
+fi
+
+# 합본 — test_claude 세션이 다음 메시지 처리 시 inject할 archive에 저장
+if [ -n "$STAGE2" ]; then
+    COMBINED="$OUTPUT
+
+---
+이번 주 도입 추천 (2차 분석)
+
+$STAGE2"
+else
+    COMBINED="$OUTPUT"
+fi
+echo "$COMBINED" > "$BRIEFING_FILE"
 
 if [ -z "$BOT_TOKEN" ]; then
     log "ERROR: 봇 토큰 없음"
@@ -68,7 +94,7 @@ fi
 
 MSG="Claude Code 개선 리서치 (${TODAY})
 
-${OUTPUT}"
+${COMBINED}"
 if [ ${#MSG} -gt 4000 ]; then
     MSG="${MSG:0:3997}..."
 fi
