@@ -29,9 +29,22 @@ mtime=$(stat -c %Y "$PROG" 2>/dev/null || echo 0)
 age=$(( now - mtime ))
 
 if [ "$age" -gt 86400 ]; then
-    echo "[$ts] cwd=$CWD progress.md stale (age=${age}s) → 압축 차단" >> "$LOG"
-    echo "progress.md가 ${age}초 전 마지막 갱신. 압축 전에 progress.md 먼저 갱신해줘." >&2
-    exit 2
+    echo "[$ts] cwd=$CWD progress.md stale (age=${age}s) → updater 동기 실행 (보험)" >> "$LOG"
+    # progress-updater 동기 실행 (compact 직전 마지막 갱신)
+    if command -v claude-progress-updater >/dev/null 2>&1; then
+        timeout 300 /home/gmoh/.local/bin/claude-progress-updater "$CWD" >> "$LOG" 2>&1 || true
+        # 갱신 후에도 여전히 stale이면 차단, 아니면 통과
+        new_mtime=$(stat -c %Y "$PROG" 2>/dev/null || echo 0)
+        if [ "$(( $(date +%s) - new_mtime ))" -gt 86400 ]; then
+            echo "[$ts] updater 후에도 stale → 압축 차단" >> "$LOG"
+            echo "progress.md updater 실행했지만 갱신 실패. 수동 점검 필요." >&2
+            exit 2
+        fi
+        echo "[$ts] updater 갱신 성공, 압축 통과" >> "$LOG"
+    else
+        echo "progress.md가 ${age}초 전 마지막 갱신. updater 미설치 → 압축 차단." >&2
+        exit 2
+    fi
 fi
 
 echo "[$ts] cwd=$CWD progress.md fresh (age=${age}s), 통과" >> "$LOG"
