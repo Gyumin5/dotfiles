@@ -139,6 +139,15 @@
             "command": "/home/gmoh/.claude/hooks/tool-latency.sh"
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/skill-call-log.sh"
+          }
+        ]
       }
     ],
     "PreCompact": [

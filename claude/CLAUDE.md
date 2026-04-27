@@ -21,6 +21,13 @@
 - "AI 협업/크로스체크" → ai-collaborate (gemini + codex 둘 다 호출, 한쪽만 금지)
 - "코드/PR 리뷰" → /code-review
 
+라우팅 객관 트리거 (키워드보다 우선):
+- 외부 최신 정보·웹 검색 필요 → Gemini (search 통합 강함). Gemini 429면 WebSearch fallback.
+- 코드 diff 50줄+ 또는 샌드박스 실행 필요 → Codex.
+- 파일 수정·생성·삭제 → Claude만. Codex/Gemini에 위임 금지 (--full-auto 등).
+- 의견 분기·세컨드 오피니언 필요 → ai-collaborate (둘 다).
+- 가벼운 한 단어/줄 답 → 어느 쪽이든 가능. AI 호출 자체 스킵 고려.
+
 Bash timeout 600000ms. 응답 없이 진행 금지. 실패 시 해당 PID만 kill 후 재시도 (pkill 금지).
 
 AI 호출 직전 한 줄 사전 고지 필수. 예: "gemini+codex 호출 중, 수 분 소요" / "codex-ask 호출 중". 고지 없이 바로 긴 호출 들어가지 않기. 호출 완료 후 결과 반드시 전달 (무응답 진행 금지).

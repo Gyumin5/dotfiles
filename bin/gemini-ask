@@ -11,6 +11,25 @@
 
 set -uo pipefail
 
+_AI_TELEM_START=$(date +%s%3N)
+_AI_TELEM_KIND=""
+_ai_telem_finalize() {
+    local ec=$?
+    local dur=$(( $(date +%s%3N) - _AI_TELEM_START ))
+    local mode="resume"
+    [ "$FORCE_NEW" = true ] && mode="new"
+    [ -n "$SESSION_ID" ] && mode="session"
+    [ -n "$TOPIC" ] && mode="topic"
+    case $ec in
+        2) _AI_TELEM_KIND="rate_limit_429" ;;
+        3) _AI_TELEM_KIND="auth_401" ;;
+        4) _AI_TELEM_KIND="server_500" ;;
+        1) [ -z "$_AI_TELEM_KIND" ] && _AI_TELEM_KIND="empty_response" ;;
+    esac
+    ai-telemetry-log gemini "$ec" "$dur" "$mode" "$_AI_TELEM_KIND" 2>/dev/null || true
+}
+trap _ai_telem_finalize EXIT
+
 FORCE_NEW=false
 TOPIC=""
 SESSION_ID=""

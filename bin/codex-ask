@@ -13,6 +13,21 @@
 
 set -uo pipefail
 
+_AI_TELEM_START=$(date +%s%3N)
+_ai_telem_finalize() {
+    local ec=$?
+    local dur=$(( $(date +%s%3N) - _AI_TELEM_START ))
+    local mode="resume"
+    [ "${FORCE_NEW:-false}" = true ] && mode="new"
+    [ -n "${SESSION_ID:-}" ] && mode="session"
+    [ -n "${TOPIC:-}" ] && mode="topic"
+    [ "${LIST_ONLY:-false}" = true ] && mode="list"
+    local kind=""
+    [ "${DEEP:-false}" = true ] && kind="deep"
+    ai-telemetry-log codex "$ec" "$dur" "$mode" "$kind" 2>/dev/null || true
+}
+trap _ai_telem_finalize EXIT
+
 SESSIONS_DIR="$HOME/.codex/sessions"
 FORCE_NEW=false
 TOPIC=""
