@@ -16,6 +16,10 @@ DATA_DIR="/home/gmoh/.local/share/ai-briefing"
 TODAY="$(date +%Y-%m-%d)"
 OUT_FILE="$DATA_DIR/claude-research_${TODAY}.md"
 LOG_FILE="$DATA_DIR/claude-research.log"
+# test_claude 세션이 다음 응답 시 컨텍스트로 끌어올 archive 위치
+BRIEFING_DIR="$HOME/.claude/state/briefings"
+BRIEFING_FILE="$BRIEFING_DIR/${TODAY}.md"
+mkdir -p "$BRIEFING_DIR"
 
 mkdir -p "$DATA_DIR"
 [ -f "$TELEGRAM_ENV" ] && source "$TELEGRAM_ENV"
@@ -27,11 +31,12 @@ PROMPT=$(cat <<'EOF'
 오늘 Claude Code 개선 리서치 수행.
 
 절차:
+0. claude 버전 체크: ls -1 ~/.local/share/claude/versions/ | sort -V | tail -1 와 readlink ~/.local/bin/claude의 끝부분 비교. 더 새로운 버전이 있으면 결과 맨앞에 "claude 신규 버전 X.Y.Z 다운로드됨 (현재 링크: A.B.C). cl로 테스트 후 심링크 갱신할까?" 한 줄 알림.
 1. WebSearch로 최근 7일 내 Claude Code / Claude Agent SDK / AI 에이전트 관련 새 기능·skill·plugin·MCP·hook·워크플로우 3~5개 찾기
-2. 각 항목에 대해 codex-ask 와 gemini-ask 를 병렬 호출해서 적용 적합성 평가 (한 쪽만 호출 금지)
-   내 환경: Ubuntu, Claude Code 2.1, 플러그인(telegram, lean-ctx, code-review, scientific-writer, clangd/pyright/typescript lsp), 스킬(gemini-ask, codex-ask, ai-collaborate, update-config, loop, schedule 등), dotfiles 관리
+2. 각 항목에 대해 codex-ask --new --topic "claude-research-$(date +%Y%m%d)" 와 gemini-ask --new --topic "claude-research-$(date +%Y%m%d)" 를 병렬 호출해서 적용 적합성 평가 (한 쪽만 호출 금지)
+   내 환경: Ubuntu, Claude Code 2.1, systemd로 8개 세션 상시 운영, 텔레그램 remote-control, 플러그인(telegram, lean-ctx, code-review, scientific-writer, clangd/pyright/typescript lsp), 스킬(gemini-ask, codex-ask, ai-collaborate, update-config, loop, schedule), dotfiles 관리, Claude Max + Opus 4.7 (1M)
 3. 각 항목 최종 판정: 도입 / 보류 / 비추 + 이유 1줄 + 적용 난이도(쉬움/중간/어려움)
-4. 한국어 평문 한 덩어리로 정리. 백틱/코드펜스 금지, **굵게** 금지, 맨앞 공백/들여쓰기 금지 (텔레그램 복붙 가능하게)
+4. 한국어 평문 한 덩어리로 정리. 백틱/코드펜스 금지, **굵게** 금지, 맨앞 공백/들여쓰기 금지. 0번 알림 있으면 맨앞에.
 5. 최종 텍스트만 stdout으로 출력. 서론·메타 멘트 금지.
 EOF
 )
@@ -45,7 +50,16 @@ if [ -z "$OUTPUT" ]; then
     exit 1
 fi
 
+# 한도 메시지 / 무의미 짧은 응답 가드 — 04-28 빈 브리핑 사고 재발 방지
+if [ ${#OUTPUT} -lt 200 ] \
+    || echo "$OUTPUT" | grep -qE "대기 루프|hit your limit|limit · resets|usage limit"; then
+    log "ABORT: 한도 또는 무의미 응답 감지 (length=${#OUTPUT}). 전송 안 함."
+    exit 3
+fi
+
 echo "$OUTPUT" > "$OUT_FILE"
+# test_claude 세션이 다음 메시지 처리 시 inject할 archive에 저장
+echo "$OUTPUT" > "$BRIEFING_FILE"
 
 if [ -z "$BOT_TOKEN" ]; then
     log "ERROR: 봇 토큰 없음"
