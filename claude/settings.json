@@ -2,6 +2,9 @@
   "respectGitignore": true,
   "awaySummaryEnabled": true,
   "autoCompactWindow": 500000,
+  "sandbox": {
+    "failIfUnavailable": false
+  },
   "env": {
     "ENABLE_PROMPT_CACHING_1H": "1"
   },
