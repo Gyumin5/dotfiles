@@ -149,6 +149,10 @@
           {
             "type": "command",
             "command": "/home/gmoh/.claude/hooks/postcompact-warn.sh"
+          },
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/inject-briefing.sh"
           }
         ]
       }
