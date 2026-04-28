@@ -1,0 +1,35 @@
+#!/bin/bash
+# claude-progress-updater-all: 모든 cs-관리 프로젝트에 progress-updater 적용.
+# systemd timer가 15분마다 이 스크립트 한 번만 호출하면 모든 세션이 갱신됨.
+
+set -uo pipefail
+
+# 프로젝트별 cwd 매핑. cs CLI가 관리하는 unit 이름 → 실제 디렉토리.
+# 새 프로젝트 추가 시 이 함수에만 한 줄 더하면 끝.
+project_cwd() {
+    case "$1" in
+        test-claude)    echo "/home/gmoh/test_claude" ;;
+        251229)         echo "/home/gmoh/mon/251229" ;;
+        bias)           echo "/home/gmoh/av-ros/test/bias" ;;
+        helipr)         echo "/home/gmoh/av-ros/test/helipr" ;;
+        velocity)       echo "/home/gmoh/av-ros/test/velocity" ;;
+        intensitylio)   echo "/home/gmoh/av-ros/test/intensitylio" ;;
+        albert)         echo "/home/gmoh/albert" ;;
+        resume)         echo "/home/gmoh/resume" ;;
+        new-loc)        echo "/home/gmoh/av-ros/test/new_loc" ;;
+        *)              echo "" ;;
+    esac
+}
+
+# enabled claude-*.service 목록 (watchdog/control-bot/progress-updater 자체 제외)
+units=$(systemctl --user list-unit-files 'claude-*.service' --state=enabled --no-legend 2>/dev/null \
+    | awk '{print $1}' \
+    | grep -v -E '^claude-(watchdog|control-bot|progress-updater)\.service$')
+
+for u in $units; do
+    name="${u#claude-}"; name="${name%.service}"
+    cwd=$(project_cwd "$name")
+    [ -z "$cwd" ] && continue
+    [ -d "$cwd" ] || continue
+    /home/gmoh/.local/bin/claude-progress-updater "$cwd" || true
+done
