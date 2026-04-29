@@ -109,6 +109,14 @@
   "hooks": {
     "PreToolUse": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/rate-limit-guard.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Bash|bash",
         "hooks": [
           {
