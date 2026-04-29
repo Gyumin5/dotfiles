@@ -1,0 +1,99 @@
+#!/bin/bash
+# rate-limit-recovery: 차단 → 해제 전환 감지 후 알림 (필요 시 userbot trigger).
+# systemd timer가 5분마다 호출.
+#
+# 동작:
+# - rate_limits 조회 (statusline_cache.json)
+# - 이전 상태 (~/.claude/state/rate-limit-blocked.flag) 와 비교
+# - 차단 → 해제 전환이고 큐 파일에 항목 있으면 → 텔레그램 알림 + (TODO: userbot trigger)
+# - userbot 미도입 상태에서는 사용자가 아무 메시지나 보내면 큐 flush됨.
+
+set -uo pipefail
+
+THRESHOLD_5H=90
+THRESHOLD_7D=99
+CACHE=~/.claude/statusline_cache.json
+QUEUE_DIR=~/.claude/state/rate-limit-queue
+STATE_FLAG=~/.claude/state/rate-limit-blocked.flag
+TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
+
+[ -f "$CACHE" ] || exit 0
+
+# rate-limits 조회
+INFO=$(python3 -c '
+import json
+try:
+  d = json.load(open("'"$CACHE"'"))
+  rl = d.get("rate_limits", {})
+  fh = rl.get("five_hour", {}); sd = rl.get("seven_day", {})
+  fh_pct = fh.get("used_percentage"); sd_pct = sd.get("used_percentage")
+  fh_pct = int(fh_pct) if isinstance(fh_pct, (int, float)) else -1
+  sd_pct = int(sd_pct) if isinstance(sd_pct, (int, float)) else -1
+  print("{}|{}".format(fh_pct, sd_pct))
+except: print("-1|-1")' 2>/dev/null)
+PCT_5H=$(echo "$INFO" | cut -d'|' -f1)
+PCT_7D=$(echo "$INFO" | cut -d'|' -f2)
+
+CURRENTLY_BLOCKED=false
+if [ "$PCT_5H" -ge "$THRESHOLD_5H" ] 2>/dev/null; then CURRENTLY_BLOCKED=true; fi
+if [ "$PCT_7D" -ge "$THRESHOLD_7D" ] 2>/dev/null; then CURRENTLY_BLOCKED=true; fi
+
+WAS_BLOCKED=false
+[ -f "$STATE_FLAG" ] && WAS_BLOCKED=true
+
+# 상태 갱신
+mkdir -p "$(dirname "$STATE_FLAG")"
+if [ "$CURRENTLY_BLOCKED" = true ]; then
+    touch "$STATE_FLAG"
+    exit 0
+fi
+
+# 현재 안 차단됨. 이전에도 안 차단됐으면 무시.
+if [ "$WAS_BLOCKED" = false ]; then
+    exit 0
+fi
+
+# 차단 → 해제 전환. flag 제거 + 알림.
+rm -f "$STATE_FLAG"
+
+# 큐된 메시지 합 계산
+TOTAL_QUEUED=0
+QUEUE_DETAIL=""
+if [ -d "$QUEUE_DIR" ]; then
+    for f in "$QUEUE_DIR"/*.jsonl; do
+        [ -f "$f" ] || continue
+        n=$(wc -l < "$f" 2>/dev/null || echo 0)
+        if [ "$n" -gt 0 ]; then
+            proj=$(basename "$f" .jsonl)
+            TOTAL_QUEUED=$((TOTAL_QUEUED + n))
+            QUEUE_DETAIL="${QUEUE_DETAIL}${proj}=${n} "
+        fi
+    done
+fi
+
+# 텔레그램 알림
+if [ -f "$TELEGRAM_ENV" ]; then
+    . "$TELEGRAM_ENV"
+    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+        if [ "$TOTAL_QUEUED" -gt 0 ]; then
+            msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 ${TOTAL_QUEUED}개 대기 (${QUEUE_DETAIL}). 아무 메시지나 보내면 자동 처리됨."
+        else
+            msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 비어있음."
+        fi
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=8689118207" \
+            --data-urlencode "text=${msg}" >/dev/null 2>&1
+    fi
+fi
+
+# TODO: userbot 도입 후 — 큐 있으면 userbot으로 "trigger:queue-flush" 메시지 자동 전송.
+# 현재는 사용자 다음 메시지가 트리거 역할.
+# 예시 (userbot 도입 시):
+#   if [ "$TOTAL_QUEUED" -gt 0 ]; then
+#       for f in "$QUEUE_DIR"/*.jsonl; do
+#           proj=$(basename "$f" .jsonl)
+#           ~/.local/share/userbot/.venv/bin/python ~/.local/share/userbot/send_trigger.py "$proj"
+#       done
+#   fi
+
+exit 0

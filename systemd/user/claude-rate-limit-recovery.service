@@ -1,0 +1,9 @@
+[Unit]
+Description=Claude Rate-Limit Recovery Monitor (5분마다 차단→해제 전환 감지 + 알림)
+
+[Service]
+Type=oneshot
+Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/gmoh/.local/bin/rate-limit-recovery
+StandardOutput=append:/home/gmoh/.claude/logs/rate-limit-recovery.log
+StandardError=append:/home/gmoh/.claude/logs/rate-limit-recovery.log
