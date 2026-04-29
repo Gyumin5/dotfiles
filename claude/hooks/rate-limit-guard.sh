@@ -17,7 +17,8 @@
 
 set -uo pipefail
 
-THRESHOLD=90
+THRESHOLD_5H=90
+THRESHOLD_7D=99
 CACHE=~/.claude/statusline_cache.json
 ALERT_FLAG=~/.claude/state/rate-limit-alerted.flag
 COOLDOWN_SEC=$((30 * 60))
@@ -41,21 +42,52 @@ case "$TOOL" in
         ;;
 esac
 
-# 3. 5h 사용량 체크
+# 3. 5h / 7d 사용량 체크 (둘 중 하나라도 임계 초과면 차단)
 [ -f "$CACHE" ] || exit 0
-PCT=$(python3 -c 'import json,sys
+INFO=$(python3 -c '
+import json, datetime
+def fmt_reset(ts):
+  tz_kst = datetime.timezone(datetime.timedelta(hours=9))
+  reset = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).astimezone(tz_kst)
+  now = datetime.datetime.now(tz_kst)
+  remain = int((reset - now).total_seconds() // 60)
+  h, m = divmod(max(remain, 0), 60)
+  ts_str = reset.strftime("%Y-%m-%d %H:%M KST")
+  rem_str = "{}h{:02d}m".format(h, m)
+  return ts_str + "|" + rem_str
 try:
-  d=json.load(open("'"$CACHE"'"))
-  rl=d.get("rate_limits",{}).get("five_hour",{})
-  v=rl.get("used_percentage")
-  if isinstance(v,(int,float)): print(int(v))
-except: pass' 2>/dev/null)
+  d = json.load(open("'"$CACHE"'"))
+  rl = d.get("rate_limits", {})
+  fh = rl.get("five_hour", {}); sd = rl.get("seven_day", {})
+  fh_pct = fh.get("used_percentage"); sd_pct = sd.get("used_percentage")
+  fh_pct = int(fh_pct) if isinstance(fh_pct, (int, float)) else -1
+  sd_pct = int(sd_pct) if isinstance(sd_pct, (int, float)) else -1
+  fh_reset = fmt_reset(fh.get("resets_at")) if fh.get("resets_at") else "|"
+  sd_reset = fmt_reset(sd.get("resets_at")) if sd.get("resets_at") else "|"
+  print("{}|{}|{}|{}".format(fh_pct, sd_pct, fh_reset, sd_reset))
+except: print("-1|-1|||")' 2>/dev/null)
 
-[ -z "$PCT" ] && exit 0
+PCT_5H=$(echo "$INFO" | cut -d'|' -f1)
+PCT_7D=$(echo "$INFO" | cut -d'|' -f2)
+RESET_5H_AT=$(echo "$INFO" | cut -d'|' -f3)
+RESET_5H_REMAIN=$(echo "$INFO" | cut -d'|' -f4)
+RESET_7D_AT=$(echo "$INFO" | cut -d'|' -f5)
+RESET_7D_REMAIN=$(echo "$INFO" | cut -d'|' -f6)
 
-if [ "$PCT" -lt "$THRESHOLD" ]; then
-    exit 0
+# 차단 사유 결정
+TRIGGER=""
+if [ "$PCT_5H" -ge "$THRESHOLD_5H" ] 2>/dev/null; then
+    TRIGGER="5h ${PCT_5H}% (>= ${THRESHOLD_5H}%) — 풀리는 시각 ${RESET_5H_AT} (앞으로 ${RESET_5H_REMAIN})"
 fi
+if [ "$PCT_7D" -ge "$THRESHOLD_7D" ] 2>/dev/null; then
+    if [ -n "$TRIGGER" ]; then
+        TRIGGER="$TRIGGER + 7d ${PCT_7D}% (>= ${THRESHOLD_7D}%) — 풀리는 시각 ${RESET_7D_AT} (앞으로 ${RESET_7D_REMAIN})"
+    else
+        TRIGGER="7d ${PCT_7D}% (>= ${THRESHOLD_7D}%) — 풀리는 시각 ${RESET_7D_AT} (앞으로 ${RESET_7D_REMAIN})"
+    fi
+fi
+
+[ -z "$TRIGGER" ] && exit 0
 
 # 4. 차단 — 텔레그램 1회 알림 (cooldown 30분)
 mkdir -p "$(dirname "$ALERT_FLAG")"
@@ -68,7 +100,9 @@ fi
 if [ "$need_alert" = true ] && [ -f "$TELEGRAM_ENV" ]; then
     . "$TELEGRAM_ENV"
     if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-        msg="5h 토큰 사용량 ${PCT}% 도달. THRESHOLD=${THRESHOLD}% 가드 작동 — 모든 tool 차단 (telegram reply/edit/react/download만 허용). 5h 리셋까지 대기."
+        msg="rate-limit-guard 작동. 모든 tool 차단 중 (telegram reply/edit/react/download만 허용).
+사유: ${TRIGGER}
+첫 차단 tool: ${TOOL:-?}"
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=8689118207" \
             --data-urlencode "text=${msg}" >/dev/null 2>&1
@@ -77,5 +111,5 @@ if [ "$need_alert" = true ] && [ -f "$TELEGRAM_ENV" ]; then
 fi
 
 # 5. PreToolUse decision: block
-echo "5h 토큰 사용량 ${PCT}% (>= ${THRESHOLD}%). 세션 lockup 방지를 위해 tool 차단 중. tool=${TOOL}" >&2
+echo "rate-limit-guard: ${TRIGGER}. tool=${TOOL} 차단" >&2
 exit 2
