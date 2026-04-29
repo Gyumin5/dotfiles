@@ -1,81 +1,44 @@
 ---
 name: ai-collaborate
-description: Gemini + Codex 병렬 협업. "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언", "다른 AI한테 물어봐", "AI한테 리뷰", "AI 토론", "합의할때까지" 등의 요청 시 자동 호출.
+description: Gemini + Codex 멀티 라운드 합의 토론. "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언", "AI 토론", "합의할때까지", "비판자 포함" 등의 요청 시 자동 호출. 단일 진입점 — 매 호출이 비판자 포함 합의 토론.
 disable-model-invocation: false
 effort: high
 ---
 
-# AI 병렬 협업
+# AI 합의 토론 (단일 진입점)
 
-## 핵심 규칙
-- gemini-ask, codex-ask는 Bash tool로 직접 실행 (skill로 호출 금지)
-- 두 호출은 병렬 foreground Bash tool call (run_in_background 금지)
-- Bash timeout 반드시 600000ms (기본 2분이면 잘림)
-- 파일 수정·생성·삭제는 Claude만 수행. codex-ask에 --full-auto 금지
-- 모든 호출에 [Project Memory] 첨부 (아래)
-- Claude는 정리자 아님: 응답 기다리는 동안 자기 의견 먼저 형성, 다른 AI 의견에 동의/반박 근거 제시, 갈리면 최종 추천안 명시
+## 핵심
+- 모든 협업/토론 트리거는 ai-debate CLI 한 가지 경로로 통일.
+- 라운드마다 codex×2 + gemini×2 (각 AI가 debater + critic 두 역할 동시에) 병렬 호출.
+- gemini 다 죽어도 codex 2개로 debater+critic 확보됨.
+- JSON 표준 출력. 라운드 간 이전 출력을 컨텍스트로 전달. 합의될 때까지 반복 (max 3 라운드).
+- 최종은 codex arbiter가 final_decision/action_steps/verification_plan/dissent로 통일 정리.
+- 산출물 ~/.claude/state/ai-debate/run-<ts>/ 저장.
 
-## Memory 첨부
+## 호출 규칙
+- Bash tool로 직접 실행. 호출 직전 한 줄 사전 고지 필수 ("ai-debate 호출 중, 수 분 소요").
+- `ai-debate "task"` 또는 stdin pipe — `cat file | ai-debate "검토"`.
+- timeout 600000ms (라운드 최대 3 + arbiter = 4 phase. phase당 최대 600초).
+- 큰 컨텍스트는 stdin으로. task arg는 짧게.
+- 프로젝트 메모리는 기본 OFF. 토론 품질 보호. 필요 시 `--with-memory`.
+- max rounds 조정: `--max-rounds 2` (가벼운 케이스), 기본 3.
 
-```bash
-MEMORY_DIR="$HOME/.claude/projects/-home-gmoh-$(basename $(pwd))/memory"
-MEMORY=""
-[ -d "$MEMORY_DIR" ] && for f in "$MEMORY_DIR"/*.md; do
-  [ "$(basename "$f")" = "MEMORY.md" ] || MEMORY+="$(cat "$f")\n---\n"
-done
-```
-
-프롬프트 형식:
-```
-[Project Memory]
-{MEMORY}
-
-[질문]
-{질문}
-```
-
-## 모드
-
-### 단순 협업 (기본)
-트리거: "AI 협업", "크로스체크", "세컨드 오피니언"
-1. gemini-ask --new + codex-ask --new 병렬 호출
-2. Claude도 자기 의견 형성 (대기 중)
-3. 종합: 합의점 / 쟁점 + Claude 판단 / 결론
-
-### 멀티라운드 토론
-트리거: "AI 토론", "깊게 논의", "합의할때까지", "여러 라운드"
-- 라운드 1: 독립 의견 (--new 사용)
-- 라운드 2~N: 이전 라운드 다른 AI 의견을 각자에게 전달 (세션 이어가기, --new 없이). 동의/반박 구분 요청
-- 종료: 실질 합의 OR 최대 3라운드 (사용자 "계속"이면 추가)
-- 끝나면 결론을 memory 저장할지 사용자에게 물어보기
-
-### 코드 리뷰
-트리거: "AI한테 코드 리뷰", "AI한테 리뷰 받아"
-1. /code-review 실행 (Claude 멀티에이전트)
-2. 동시에 cat file | gemini-ask --new ... + cat file | codex-ask --new ...
-3. 통합: 공통 지적(고신뢰) / 단일 지적(검토) / 개선안 종합
-
-## Deep 모드
-"깊게", "더 열심히", "deep" 등 → codex-ask에 --deep 추가. gemini-ask는 미지원.
+## 출력 형식 (사용자 응답)
+- 라운드별 한 줄 요약 (debater positions / critic should_proceed 표시)
+- 마지막에 ARBITER 블록: FINAL + rationale + action_steps + verification_plan + dissent
+- 토큰 절약 위해 모든 debater/critic 원문은 dump 안 함. run_dir 경로만 안내.
 
 ## 실패 처리
-AI 응답 timeout: 10초 후 1회 재시도. 또 실패면 해당 AI 제외하고 진행 + 사용자 알림 ("Gemini 실패. Claude+Codex로 진행")
+- gemini 429/parse 실패는 자연스럽게 무시 (codex 2개로 충분). 사용자 알림 불필요.
+- codex 둘 다 실패면 그 라운드 무효 → 다음 라운드 재시도.
+- arbiter 실패면 그 사실만 알리고 라운드 결과 dump.
 
-## 출력 형식
+## 코드 리뷰 변형
+"AI한테 코드 리뷰" / "AI한테 리뷰 받아" 트리거:
+- /code-review (Claude 멀티에이전트) 실행과 병행해서 `cat file | ai-debate "리뷰: <파일> 의 문제점·개선안"` 호출.
+- 통합: 공통 지적(고신뢰) / 단일 지적(검토) / arbiter 권고안.
 
-단순 협업:
-```
-## Claude 의견 (먼저 형성)
-## Gemini 의견
-## Codex 의견
-## 종합: 합의 / 쟁점+Claude판단 / 결론
-```
-
-멀티라운드:
-```
-## 라운드 N
-- Claude / Gemini / Codex 의견 (또는 반박)
-- 합의 진전
-## 최종 종합
-- 합의 / 미합의 쟁점+Claude 최종판단 / 결론
-```
+## 안 하는 것
+- 트리거 분리 (모든 협업 키워드는 ai-debate 단일 경로). 사용자 결정 (2026-04-29).
+- ai-debate 안에서 claude 호출 (부모 세션 telegram MCP를 disrupt). 풀은 codex+gemini만.
+- 1라운드만 돌고 종료 (합의 추구가 본질).

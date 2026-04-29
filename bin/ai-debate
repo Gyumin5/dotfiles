@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+"""ai-debate: 멀티 AI 합의 토론 오케스트레이터 (단일 진입점).
+
+각 라운드마다 codex와 gemini를 각각 두 번 호출 — 한 번은 debater(의견),
+한 번은 critic(비판). 같은 task에 다른 역할 프롬프트로 독립 호출.
+gemini 다 죽어도 codex 2개로 debater+critic 확보됨.
+
+JSON 표준화 출력. 라운드 간에 이전 출력 전체를 다음 라운드 컨텍스트로 전달.
+critic 둘 다 should_proceed=true이고 debater 둘이 position 수렴하면 합의 종료.
+합의 안 되면 max_rounds(기본 3)까지 반복. 마지막에 codex arbiter가 final 결정 통일 정리.
+
+사용:
+  ai-debate "task"
+  cat big.md | ai-debate "이거 검토"
+  ai-debate --max-rounds 2 --seed 7 "task"
+
+산출물: ~/.claude/state/ai-debate/run-<ts>/
+- meta.json, task.txt
+- r{N}.{role}.{agent}.{prompt|raw|normalized}.txt|json
+- r{N}.outputs.json (라운드 통합)
+- arbiter.{prompt|raw|normalized}
+- final_result.json
+"""
+
+import argparse
+import json
+import os
+import random
+import re
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from pathlib import Path
+
+POOL = ["codex", "gemini"]
+ROLES = ["debater", "critic"]
+TIMEOUT = 600
+RUN_BASE = Path.home() / ".claude" / "state" / "ai-debate"
+
+SCHEMAS = {
+    "debater": ["position", "reasoning", "evidence", "verification", "confidence"],
+    "critic": ["weakest_assumption", "counter_examples", "missed_risks", "should_proceed", "reasoning"],
+    "arbiter": ["final_decision", "rationale", "action_steps", "verification_plan", "dissent"],
+}
+
+
+def now_iso():
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def project_memory():
+    cwd = Path.cwd()
+    proj_key = "-home-gmoh-" + cwd.name
+    mem_dir = Path.home() / ".claude" / "projects" / proj_key / "memory"
+    if not mem_dir.is_dir():
+        return ""
+    parts = []
+    for f in sorted(mem_dir.glob("*.md")):
+        if f.name == "MEMORY.md":
+            continue
+        try:
+            parts.append(f.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            pass
+    return "\n---\n".join(parts)
+
+
+def role_prompt(role, task, memory_block, prior_block):
+    schema_keys = SCHEMAS[role]
+    if role == "debater":
+        instructions = (
+            "당신은 토론자(debater). 주어진 task에 대해 자신의 의견을 제시하라. "
+            "구체 근거(evidence)와 검증 방법(verification 명령 또는 절차)을 포함하라. "
+            "confidence는 0.0~1.0."
+        )
+    elif role == "critic":
+        instructions = (
+            "당신은 비판자(critic). 토론자들의 의견을 받아 가장 약한 가정, 반증 사례, "
+            "놓친 risk를 찾아라. should_proceed는 합의대로 진행해도 안전한지 판정. "
+            "동의에 휘둘리지 말고 적대적 시각으로."
+        )
+    else:
+        instructions = (
+            "당신은 아비터(arbiter). 모든 라운드 출력을 받아 최종 결정을 내려라. "
+            "action_steps는 실행 가능한 단계, verification_plan은 결정이 옳았는지 확인하는 방법. "
+            "dissent에 합의 안 된 부분 명시."
+        )
+
+    parts = [f"역할: {role}", "", instructions, ""]
+    if memory_block:
+        parts.append("[Project Memory]")
+        parts.append(memory_block[:6000])
+        parts.append("")
+    parts.append("[task]")
+    parts.append(task)
+    parts.append("")
+    if prior_block:
+        parts.append(prior_block)
+        parts.append("")
+    parts.append("출력은 반드시 다음 JSON 스키마로만:")
+    parts.append(json.dumps({k: "<value>" for k in schema_keys}, ensure_ascii=False, indent=2))
+    parts.append("JSON 외 텍스트, 백틱, 코드펜스 금지. 한국어 평문.")
+    return "\n".join(parts)
+
+
+def parse_json_loose(text):
+    """Balanced-brace 스캐너. 후보 중 스키마 키 매칭이 가장 많은 것 반환."""
+    if not text:
+        return None
+    text = re.sub(r"```(?:json)?", "", text)
+    schema_keys = set()
+    for keys in SCHEMAS.values():
+        schema_keys.update(keys)
+    candidates = []
+    n = len(text)
+    i = 0
+    while i < n:
+        if text[i] == "{":
+            depth = 0
+            in_str = False
+            esc = False
+            j = i
+            while j < n:
+                c = text[j]
+                if in_str:
+                    if esc:
+                        esc = False
+                    elif c == "\\":
+                        esc = True
+                    elif c == '"':
+                        in_str = False
+                else:
+                    if c == '"':
+                        in_str = True
+                    elif c == "{":
+                        depth += 1
+                    elif c == "}":
+                        depth -= 1
+                        if depth == 0:
+                            blob = text[i:j + 1]
+                            try:
+                                obj = json.loads(blob)
+                            except json.JSONDecodeError:
+                                blob2 = re.sub(r",(\s*[}\]])", r"\1", blob)
+                                try:
+                                    obj = json.loads(blob2)
+                                except json.JSONDecodeError:
+                                    obj = None
+                            if isinstance(obj, dict):
+                                candidates.append(obj)
+                            break
+                j += 1
+            i = j + 1
+        else:
+            i += 1
+    if not candidates:
+        return None
+    candidates.sort(key=lambda o: len(set(o.keys()) & schema_keys), reverse=True)
+    return candidates[0]
+
+
+def call_agent(agent, role, prompt, run_dir, label):
+    raw_path = run_dir / f"{label}.raw.txt"
+    prompt_path = run_dir / f"{label}.prompt.txt"
+    prompt_path.write_text(prompt, encoding="utf-8")
+    started = time.time()
+    try:
+        if agent == "gemini":
+            cmd = ["gemini-ask", "--new", "위 지시대로 JSON만 출력"]
+        elif agent == "codex":
+            cmd = ["codex-ask", "--new", "위 지시대로 JSON만 출력"]
+        else:
+            return {"_error": f"unknown agent {agent}", "_duration": 0, "_agent": agent, "_role": role}
+        env = os.environ.copy()
+        env["AI_OUT_RAW"] = "1"
+        proc = subprocess.run(
+            cmd, input=prompt, capture_output=True, text=True,
+            timeout=TIMEOUT, env=env,
+        )
+        raw = proc.stdout + ("\n[stderr]\n" + proc.stderr if proc.stderr.strip() else "")
+        raw_path.write_text(raw, encoding="utf-8")
+        if proc.returncode != 0:
+            return {"_error": f"{agent} exit {proc.returncode}", "_duration": round(time.time() - started, 2), "_agent": agent, "_role": role}
+    except subprocess.TimeoutExpired:
+        return {"_error": f"{agent} timeout", "_duration": round(time.time() - started, 2), "_agent": agent, "_role": role}
+    except Exception as e:
+        return {"_error": f"{agent} {e}", "_duration": round(time.time() - started, 2), "_agent": agent, "_role": role}
+
+    parsed = parse_json_loose(proc.stdout)
+    if parsed is None:
+        return {"_error": f"{agent} JSON parse failed", "_raw": proc.stdout[:300], "_duration": round(time.time() - started, 2), "_agent": agent, "_role": role}
+    parsed["_agent"] = agent
+    parsed["_role"] = role
+    parsed["_duration"] = round(time.time() - started, 2)
+    norm_path = run_dir / f"{label}.normalized.json"
+    norm_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+    return parsed
+
+
+def consensus_reached(round_outputs):
+    """비판자 모두 should_proceed=true이고 debater들 position이 수렴하면 합의."""
+    debs = [o for o in round_outputs if o.get("_role") == "debater" and "_error" not in o]
+    crits = [o for o in round_outputs if o.get("_role") == "critic" and "_error" not in o]
+    if not debs or not crits:
+        return False
+
+    def truthy(v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "yes", "예", "y", "1")
+        return False
+
+    if not all(truthy(c.get("should_proceed")) for c in crits):
+        return False
+
+    if len(debs) < 2:
+        # debater 1명뿐이면 critic 통과로만 합의 인정
+        return True
+
+    # 모든 debater 쌍의 position 자카드 평균이 0.5 이상이면 수렴
+    from itertools import combinations
+    sets = [set((d.get("position", "") or "").lower().split()) for d in debs]
+    pairs = list(combinations(range(len(sets)), 2))
+    if not pairs:
+        return True
+    jaccards = [
+        len(sets[a] & sets[b]) / max(len(sets[a] | sets[b]), 1)
+        for a, b in pairs
+    ]
+    return sum(jaccards) / len(jaccards) >= 0.5
+
+
+def build_prior_block(prior_outputs):
+    if not prior_outputs:
+        return ""
+    summary = []
+    for o in prior_outputs:
+        if "_error" in o:
+            continue
+        rnd = o.get("_round", "?")
+        agent = o.get("_agent", "?")
+        role = o.get("_role", "?")
+        keys = SCHEMAS.get(role, [])
+        compact = {k: o.get(k) for k in keys if o.get(k) is not None}
+        summary.append({"round": rnd, "agent": agent, "role": role, **compact})
+    return "[이전 라운드 출력]\n" + json.dumps(summary, ensure_ascii=False, indent=2)[:10000]
+
+
+def run_round(round_idx, task, memory_block, prior_outputs, run_dir):
+    prior_block = build_prior_block(prior_outputs)
+    tasks = []
+    for agent in POOL:
+        for role in ROLES:
+            label = f"r{round_idx}.{role}.{agent}"
+            prompt = role_prompt(role, task, memory_block, prior_block)
+            tasks.append((agent, role, prompt, label))
+
+    outputs = []
+    with ThreadPoolExecutor(max_workers=len(tasks)) as ex:
+        futures = {ex.submit(call_agent, a, r, p, run_dir, l): (a, r) for (a, r, p, l) in tasks}
+        for f in as_completed(futures):
+            o = f.result()
+            o["_round"] = round_idx
+            outputs.append(o)
+    return outputs
+
+
+def run_arbiter(task, memory_block, all_outputs, run_dir):
+    prior_block = build_prior_block(all_outputs)
+    prompt = role_prompt("arbiter", task, memory_block, prior_block)
+    out = call_agent("codex", "arbiter", prompt, run_dir, "arbiter")
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description="ai-debate: 멀티 AI 합의 토론")
+    ap.add_argument("task", help="토론할 task")
+    ap.add_argument("--max-rounds", type=int, default=3)
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--with-memory", action="store_true", help="프로젝트 메모리 주입 (기본: off)")
+    args = ap.parse_args()
+
+    task = args.task
+    if not sys.stdin.isatty():
+        stdin_data = sys.stdin.read().strip()
+        if stdin_data:
+            task = stdin_data + "\n\n---\n\n" + task
+
+    seed = args.seed if args.seed is not None else int(time.time())
+    rng = random.Random(seed)  # reserved for future role rotation seed
+    del rng
+
+    # 기본: 프로젝트 메모리 주입 안 함 (쓸데없는 정보가 토론 품질을 떨어뜨림).
+    # 명시적으로 --with-memory 줬을 때만 주입. 컨텍스트 필요하면 task에 직접 쓰거나 stdin으로 첨부.
+    memory_block = project_memory() if args.with_memory else ""
+
+    run_id = now_iso()
+    run_dir = RUN_BASE / f"run-{run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "task.txt").write_text(task, encoding="utf-8")
+    (run_dir / "meta.json").write_text(json.dumps({
+        "seed": seed, "started": run_id, "pool": POOL, "roles": ROLES,
+        "max_rounds": args.max_rounds, "memory_attached": bool(memory_block),
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    all_outputs = []
+    final_consensus = False
+    rounds_done = 0
+    for round_idx in range(1, args.max_rounds + 1):
+        outs = run_round(round_idx, task, memory_block, all_outputs, run_dir)
+        (run_dir / f"r{round_idx}.outputs.json").write_text(
+            json.dumps(outs, ensure_ascii=False, indent=2), encoding="utf-8")
+        all_outputs.extend(outs)
+        rounds_done = round_idx
+        if consensus_reached(outs):
+            final_consensus = True
+            break
+
+    # arbiter는 항상 최종 정리자 역할 (option B)
+    arb = run_arbiter(task, memory_block, all_outputs, run_dir)
+    all_outputs.append(arb)
+
+    final = {
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "seed": seed,
+        "rounds_done": rounds_done,
+        "consensus_reached": final_consensus,
+        "max_rounds": args.max_rounds,
+        "outputs": all_outputs,
+    }
+    (run_dir / "final_result.json").write_text(
+        json.dumps(final, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # human summary
+    print(f"=== ai-debate run {run_id} ===")
+    print(f"rounds={rounds_done}/{args.max_rounds} consensus={final_consensus}")
+    print(f"artifacts={run_dir}")
+    print()
+
+    # 라운드별 한 줄 요약
+    for r in range(1, rounds_done + 1):
+        deb_pos = []
+        crit_sp = []
+        for o in all_outputs:
+            if o.get("_round") != r or "_error" in o:
+                continue
+            if o.get("_role") == "debater":
+                p = (o.get("position", "") or "").strip()[:60]
+                deb_pos.append(f"{o.get('_agent')}={p}")
+            elif o.get("_role") == "critic":
+                sp = o.get("should_proceed")
+                crit_sp.append(f"{o.get('_agent')}={'OK' if sp in (True, 'true', 'yes', 'Y', 'y', 'True', '예', 1) else 'NO'}")
+        errs = [f"{o.get('_agent')}/{o.get('_role')}:{o['_error']}" for o in all_outputs if o.get("_round") == r and "_error" in o]
+        print(f"R{r}  debaters: {' | '.join(deb_pos) or '-'}")
+        print(f"     critics : {' | '.join(crit_sp) or '-'}")
+        if errs:
+            print(f"     errors  : {' ; '.join(errs)}")
+        print()
+
+    # arbiter 최종 결정
+    if "_error" in arb:
+        print(f"ARBITER FAILED: {arb['_error']}")
+        return
+    print("--- ARBITER (codex) ---")
+    fd = arb.get("final_decision", "(no decision)")
+    print(f"FINAL: {fd}")
+    rationale = arb.get("rationale", "")
+    if rationale:
+        print(f"  rationale: {rationale}")
+    steps = arb.get("action_steps")
+    if steps:
+        if isinstance(steps, list):
+            print("  action_steps:")
+            for s in steps:
+                print(f"    - {s}")
+        else:
+            print(f"  action_steps: {steps}")
+    vp = arb.get("verification_plan")
+    if vp:
+        print(f"  verification_plan: {vp}")
+    dissent = arb.get("dissent")
+    if dissent:
+        print(f"  dissent: {dissent}")
+
+
+if __name__ == "__main__":
+    main()
