@@ -58,8 +58,15 @@ if [ "$WAS_BLOCKED" = false ]; then
     exit 0
 fi
 
-# 차단 → 해제 전환. flag 제거 + 알림.
+# 차단 → 해제 전환. flag 제거 + bypass flag도 자동 정리 + 알림.
 rm -f "$STATE_FLAG"
+# 사용자가 컨트롤봇으로 켜둔 bypass 는 리셋되면 자동 삭제 (가드를 다시 작동시키기 위함)
+CLEARED_BYPASS=""
+for bf in ~/.claude/state/rate-limit-bypass.flag ~/.claude/state/rate-limit-bypass-*.flag; do
+    [ -f "$bf" ] || continue
+    rm -f "$bf"
+    CLEARED_BYPASS="${CLEARED_BYPASS}$(basename "$bf") "
+done
 
 # 프로젝트별 알림: 각 프로젝트의 .claude/telegram/.env 사용해서 해당 봇으로만 보냄.
 # 큐 jsonl 옆 .cwd 파일에 prompt-guard가 cwd 기록해둠.
@@ -81,10 +88,12 @@ send_project_alert() {
     [ -f "$env_file" ] || return 0
     ( . "$env_file"
       if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+          local bypass_note=""
+          [ -n "$CLEARED_BYPASS" ] && bypass_note=" (bypass flag 자동 해제: ${CLEARED_BYPASS})"
           if [ "$qcount" -gt 0 ]; then
-              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 ${qcount}개 대기. 아무 메시지나 보내면 자동 처리됨."
+              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 ${qcount}개 대기. 아무 메시지나 보내면 자동 처리됨."
           else
-              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 비어있음."
+              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 비어있음."
           fi
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=8689118207" \

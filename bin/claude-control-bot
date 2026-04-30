@@ -109,6 +109,47 @@ def bypass_proj_flag(name):
     return BYPASS_DIR / f"rate-limit-bypass-{proj}.flag", proj
 
 
+THRESHOLD_5H = 90
+THRESHOLD_7D = 99
+
+
+def current_rate_limits():
+    """statusline_cache 기반 (5h%, 7d%, 5h_reset_str, 7d_reset_str, blocked_now)"""
+    try:
+        from datetime import datetime, timezone, timedelta
+        kst = timezone(timedelta(hours=9))
+        path = Path.home() / ".claude" / "statusline_cache.json"
+        d = json.loads(path.read_text())
+        rl = d.get("rate_limits", {})
+        fh = rl.get("five_hour", {}) or {}
+        sd = rl.get("seven_day", {}) or {}
+        now = time.time()
+        def eff(w):
+            rt = w.get("resets_at")
+            if rt and now > rt:
+                return 0
+            v = w.get("used_percentage")
+            return int(v) if isinstance(v, (int, float)) else -1
+        p5, p7 = eff(fh), eff(sd)
+        r5 = datetime.fromtimestamp(fh.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if fh.get("resets_at") else "?"
+        r7 = datetime.fromtimestamp(sd.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if sd.get("resets_at") else "?"
+        blocked = (p5 >= THRESHOLD_5H) or (p7 >= THRESHOLD_7D)
+        return p5, p7, r5, r7, blocked
+    except Exception:
+        return -1, -1, "?", "?", False
+
+
+def bypass_menu_text():
+    p5, p7, r5, r7, blocked = current_rate_limits()
+    head = (
+        f"5h: {p5}% (리셋 {r5}) | 7d: {p7}% (리셋 {r7})\n"
+        f"현재 가드 발동: {'🚫 YES' if blocked else '✅ NO'}\n\n"
+        "각 세션 90% 가드 bypass 토글 (🟢=우회중, ⚪=가드 적용).\n"
+        "리셋되면 bypass flag 자동 삭제됨.\n"
+    )
+    return head
+
+
 def bypass_menu_markup():
     BYPASS_DIR.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -319,8 +360,7 @@ def handle_callback(cb):
             text="최신 대화 볼 세션 선택:", reply_markup=session_menu_markup("recent"))
     elif data == "menu:bypass":
         api("editMessageText", chat_id=chat_id, message_id=message_id,
-            text="90% rate-limit 가드 bypass 토글 (🟢=ON, ⚪=OFF):",
-            reply_markup=bypass_menu_markup())
+            text=bypass_menu_text(), reply_markup=bypass_menu_markup())
     elif data.startswith("bypass-toggle:"):
         target = data[len("bypass-toggle:"):]
         BYPASS_DIR.mkdir(parents=True, exist_ok=True)
@@ -338,8 +378,7 @@ def handle_callback(cb):
                 else:
                     flag.touch()
         api("editMessageText", chat_id=chat_id, message_id=message_id,
-            text="90% rate-limit 가드 bypass 토글 (🟢=ON, ⚪=OFF):",
-            reply_markup=bypass_menu_markup())
+            text=bypass_menu_text(), reply_markup=bypass_menu_markup())
     elif data.startswith("recent:"):
         name = data[len("recent:"):]
         out = read_recent(name)
