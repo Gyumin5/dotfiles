@@ -59,7 +59,14 @@ def list_sessions():
         names = []
         for line in out.splitlines():
             unit = line.strip().split()[0] if line.strip() else ""
-            if not unit or unit == "claude-watchdog.service":
+            if not unit:
+                continue
+            if unit in ("claude-watchdog.service", "claude-control-bot.service",
+                        "claude-progress-updater.service", "claude-progress-updater-all.service",
+                        "claude-rate-limit-recovery.service", "claude-daily-research.service"):
+                continue
+            # claude-*.service 중 Claude Code 세션이 아닌 보조 서비스 제외
+            if unit.startswith("claude-progress") or unit.startswith("claude-rate-limit") or unit.startswith("claude-daily"):
                 continue
             # claude-<name>.service → <name>
             name = unit[len("claude-"):-len(".service")]
