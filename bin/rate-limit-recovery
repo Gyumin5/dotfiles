@@ -15,7 +15,7 @@ THRESHOLD_7D=99
 CACHE=~/.claude/statusline_cache.json
 QUEUE_DIR=~/.claude/state/rate-limit-queue
 STATE_FLAG=~/.claude/state/rate-limit-blocked.flag
-TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
+FALLBACK_TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
 
 [ -f "$CACHE" ] || exit 0
 
@@ -61,30 +61,60 @@ fi
 # 차단 → 해제 전환. flag 제거 + 알림.
 rm -f "$STATE_FLAG"
 
-# 큐된 메시지 합 계산
-TOTAL_QUEUED=0
-QUEUE_DETAIL=""
+# 프로젝트별 알림: 각 프로젝트의 .claude/telegram/.env 사용해서 해당 봇으로만 보냄.
+# 큐 jsonl 옆 .cwd 파일에 prompt-guard가 cwd 기록해둠.
+send_project_alert() {
+    local proj="$1" cwd="$2" qcount="$3"
+    local env_file=""
+    if [ -n "$cwd" ] && [ -f "${cwd}/.claude/telegram/.env" ]; then
+        env_file="${cwd}/.claude/telegram/.env"
+    else
+        # cwd 모르면 흔한 위치 탐색
+        for cand in ~/${proj} ~/mon/${proj} ~/av-ros/test/${proj} ~/av-ros/${proj}; do
+            if [ -f "${cand}/.claude/telegram/.env" ]; then
+                env_file="${cand}/.claude/telegram/.env"
+                break
+            fi
+        done
+    fi
+    [ -f "$env_file" ] || env_file="$FALLBACK_TELEGRAM_ENV"
+    [ -f "$env_file" ] || return 0
+    ( . "$env_file"
+      if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+          if [ "$qcount" -gt 0 ]; then
+              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 ${qcount}개 대기. 아무 메시지나 보내면 자동 처리됨."
+          else
+              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 비어있음."
+          fi
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=8689118207" \
+              --data-urlencode "text=${msg}" >/dev/null 2>&1
+      fi
+    )
+}
+
+NOTIFIED=false
 if [ -d "$QUEUE_DIR" ]; then
+    # 큐 있는 프로젝트 우선
     for f in "$QUEUE_DIR"/*.jsonl; do
         [ -f "$f" ] || continue
         n=$(wc -l < "$f" 2>/dev/null || echo 0)
+        proj=$(basename "$f" .jsonl)
+        cwd_file="$QUEUE_DIR/${proj}.cwd"
+        cwd=""
+        [ -f "$cwd_file" ] && cwd=$(cat "$cwd_file")
         if [ "$n" -gt 0 ]; then
-            proj=$(basename "$f" .jsonl)
-            TOTAL_QUEUED=$((TOTAL_QUEUED + n))
-            QUEUE_DETAIL="${QUEUE_DETAIL}${proj}=${n} "
+            send_project_alert "$proj" "$cwd" "$n"
+            NOTIFIED=true
         fi
     done
 fi
 
-# 텔레그램 알림
-if [ -f "$TELEGRAM_ENV" ]; then
-    . "$TELEGRAM_ENV"
+# 큐 있는 프로젝트가 하나도 없으면 fallback 봇으로 일반 알림 1회.
+if [ "$NOTIFIED" = false ] && [ -f "$FALLBACK_TELEGRAM_ENV" ]; then
+    . "$FALLBACK_TELEGRAM_ENV"
     if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-        if [ "$TOTAL_QUEUED" -gt 0 ]; then
-            msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 ${TOTAL_QUEUED}개 대기 (${QUEUE_DETAIL}). 아무 메시지나 보내면 자동 처리됨."
-        else
-            msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 비어있음."
-        fi
+        msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 비어있음."
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=8689118207" \
             --data-urlencode "text=${msg}" >/dev/null 2>&1

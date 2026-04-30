@@ -20,17 +20,38 @@ set -uo pipefail
 THRESHOLD_5H=90
 THRESHOLD_7D=99
 CACHE=~/.claude/statusline_cache.json
-ALERT_FLAG=~/.claude/state/rate-limit-alerted.flag
+ALERT_FLAG_PREFIX=~/.claude/state/rate-limit-alerted
 COOLDOWN_SEC=$((30 * 60))
-TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
+FALLBACK_TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
 
-# 1. event JSON 읽기 (tool_name 추출용). 못 읽으면 안전하게 통과.
+# 1. event JSON 읽기 (tool_name + cwd 추출). 못 읽으면 안전하게 통과.
 EVENT=$(cat 2>/dev/null || echo '{}')
 TOOL=$(printf '%s' "$EVENT" | python3 -c 'import json,sys
 try:
   d=json.loads(sys.stdin.read())
   print(d.get("tool_name") or d.get("tool") or "")
 except: print("")' 2>/dev/null)
+CWD=$(printf '%s' "$EVENT" | python3 -c 'import json,sys
+try:
+  d=json.loads(sys.stdin.read())
+  print(d.get("cwd") or "")
+except: print("")' 2>/dev/null)
+[ -z "$CWD" ] && CWD="$PWD"
+PROJ=$(basename "$CWD")
+ALERT_FLAG="${ALERT_FLAG_PREFIX}-${PROJ}.flag"
+PROJECT_TELEGRAM_ENV="${CWD}/.claude/telegram/.env"
+if [ -f "$PROJECT_TELEGRAM_ENV" ]; then
+    TELEGRAM_ENV="$PROJECT_TELEGRAM_ENV"
+else
+    TELEGRAM_ENV="$FALLBACK_TELEGRAM_ENV"
+fi
+
+# 1.5. bypass flag — 사용자가 임시로 90% 가드 무시하고 싶을 때
+BYPASS_GLOBAL=~/.claude/state/rate-limit-bypass.flag
+BYPASS_PROJ=~/.claude/state/rate-limit-bypass-${PROJ}.flag
+if [ -f "$BYPASS_GLOBAL" ] || [ -f "$BYPASS_PROJ" ]; then
+    exit 0
+fi
 
 # 2. 허용 목록 — 차단 중에도 통과시킬 tools (claude가 텔레그램 응답 못 하면 사용자 무시 상태됨)
 case "$TOOL" in

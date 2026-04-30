@@ -19,7 +19,7 @@ CACHE=~/.claude/statusline_cache.json
 QUEUE_DIR=~/.claude/state/rate-limit-queue
 ALERT_FLAG_PREFIX=~/.claude/state/rate-limit-prompt-alert
 COOLDOWN_SEC=300
-TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
+FALLBACK_TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
 
 mkdir -p "$QUEUE_DIR"
 
@@ -38,6 +38,22 @@ except: print("")' 2>/dev/null)
 [ -z "$CWD" ] && CWD="$PWD"
 PROJ=$(basename "$CWD")
 QUEUE_FILE="$QUEUE_DIR/${PROJ}.jsonl"
+CWD_FILE="$QUEUE_DIR/${PROJ}.cwd"
+# 프로젝트별 telegram bot로 라우팅. recovery script가 큐 비어도 cwd 알 수 있게 매번 갱신.
+echo "$CWD" > "$CWD_FILE" 2>/dev/null
+PROJECT_TELEGRAM_ENV="${CWD}/.claude/telegram/.env"
+if [ -f "$PROJECT_TELEGRAM_ENV" ]; then
+    TELEGRAM_ENV="$PROJECT_TELEGRAM_ENV"
+else
+    TELEGRAM_ENV="$FALLBACK_TELEGRAM_ENV"
+fi
+
+# 1.5. bypass flag — 사용자가 임시로 90% 가드 무시하고 싶을 때
+BYPASS_GLOBAL=~/.claude/state/rate-limit-bypass.flag
+BYPASS_PROJ=~/.claude/state/rate-limit-bypass-${PROJ}.flag
+if [ -f "$BYPASS_GLOBAL" ] || [ -f "$BYPASS_PROJ" ]; then
+    exit 0
+fi
 
 # 2. rate-limits 조회
 [ -f "$CACHE" ] || exit 0
