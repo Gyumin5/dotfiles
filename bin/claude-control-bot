@@ -128,7 +128,7 @@ def current_rate_limits():
             if rt and now > rt:
                 return 0
             v = w.get("used_percentage")
-            return int(v) if isinstance(v, (int, float)) else -1
+            return int(round(v)) if isinstance(v, (int, float)) else -1
         p5, p7 = eff(fh), eff(sd)
         r5 = datetime.fromtimestamp(fh.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if fh.get("resets_at") else "?"
         r7 = datetime.fromtimestamp(sd.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if sd.get("resets_at") else "?"
@@ -247,33 +247,84 @@ def read_recent(name, max_turns=6, max_chars=3000):
     return result[:max_chars]
 
 
+def _pct_to_int(v):
+    """소수점 잡음(55.00000000000001 같은 부동소수) 제거. 항상 0~100 정수로."""
+    if isinstance(v, (int, float)):
+        return int(round(v))
+    return None
+
+
 def read_statusline():
-    """~/.claude/statusline_cache.json에서 토큰 사용량/리셋 타임 읽어 문자열 반환"""
+    """rate-limit + 세션별 health 표시. ctx/cost/cache는 숨김."""
     try:
         path = Path.home() / ".claude" / "statusline_cache.json"
         d = json.loads(path.read_text())
         from datetime import datetime, timezone, timedelta
         kst = timezone(timedelta(hours=9))
-        rl5 = d.get("rate_limits", {}).get("five_hour", {})
-        rl7 = d.get("rate_limits", {}).get("seven_day", {})
-        model = d.get("model", {}).get("display_name", "?")
-        ctx = d.get("context_window", {}).get("used_percentage", "?")
-        cost = d.get("cost", {}).get("total_cost_usd", 0)
-        rl5_pct = rl5.get("used_percentage", "?")
-        rl7_pct = rl7.get("used_percentage", "?")
+        now = time.time()
+        rl5 = d.get("rate_limits", {}).get("five_hour", {}) or {}
+        rl7 = d.get("rate_limits", {}).get("seven_day", {}) or {}
+
+        def eff_pct(w):
+            rt = w.get("resets_at")
+            if rt and now > rt:
+                return 0
+            return _pct_to_int(w.get("used_percentage"))
+
+        p5, p7 = eff_pct(rl5), eff_pct(rl7)
         r5 = datetime.fromtimestamp(rl5.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if rl5.get("resets_at") else "?"
         r7 = datetime.fromtimestamp(rl7.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if rl7.get("resets_at") else "?"
-        age = int(time.time() - d.get("_cached_at", 0))
-        cwd = d.get("cwd", "?")
-        return (
-            f"{model}\n"
-            f"ctx: {ctx}% | cost: ${cost:.2f}\n"
-            f"5h: {rl5_pct}% (리셋 {r5})\n"
-            f"7d: {rl7_pct}% (리셋 {r7})\n"
-            f"cache: {age}s 전 ({cwd.split('/')[-1]})"
-        )
+        usage_lines = [
+            f"5h: {p5 if p5 is not None else '?'}% (리셋 {r5})",
+            f"7d: {p7 if p7 is not None else '?'}% (리셋 {r7})",
+        ]
+
+        health_lines = ["", "세션 / 텔레그램봇:"]
+        for name in list_sessions():
+            s_ok, bot_ok = session_health(name)
+            s_icon = "🟢" if s_ok else "🔴"
+            bot_icon = "🟢" if bot_ok else ("⚪" if s_ok else "🔴")
+            health_lines.append(f"{s_icon} {name}  bot:{bot_icon}")
+        return "\n".join(usage_lines + health_lines)
     except Exception as e:
         return f"[statusline read error] {e}"
+
+
+def session_health(name):
+    """(service_active, bun_alive) tuple. bun=텔레그램 MCP 자식."""
+    unit = f"claude-{name}.service"
+    try:
+        active = subprocess.check_output(
+            ["systemctl", "--user", "is-active", unit], text=True, timeout=3,
+        ).strip() == "active"
+    except Exception:
+        active = False
+    if not active:
+        return False, False
+    bun_alive = False
+    cgroup_paths = [
+        f"/sys/fs/cgroup/systemd/user.slice/user-1000.slice/user@1000.service/{unit}/cgroup.procs",
+        f"/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/{unit}/cgroup.procs",
+    ]
+    for cp in cgroup_paths:
+        try:
+            with open(cp) as f:
+                for line in f:
+                    pid = line.strip()
+                    if not pid:
+                        continue
+                    try:
+                        with open(f"/proc/{pid}/comm") as cf:
+                            if cf.read().strip() == "bun":
+                                bun_alive = True
+                                break
+                    except Exception:
+                        continue
+            if bun_alive:
+                break
+        except FileNotFoundError:
+            continue
+    return active, bun_alive
 
 
 def session_menu_markup(action):
