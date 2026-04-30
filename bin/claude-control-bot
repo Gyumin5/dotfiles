@@ -88,11 +88,10 @@ def run_cs(*args, timeout=30):
 
 def main_menu_markup():
     return {"inline_keyboard": [
-        [{"text": "❤️ Health", "callback_data": "health"},
-         {"text": "📊 Status", "callback_data": "status"}],
+        [{"text": "📊 Status", "callback_data": "status"},
+         {"text": "🚧 Bypass…", "callback_data": "menu:bypass"}],
         [{"text": "📜 Recent…", "callback_data": "menu:recent"},
          {"text": "🔄 Restart…", "callback_data": "menu:restart"}],
-        [{"text": "🚧 Bypass…", "callback_data": "menu:bypass"}],
     ]}
 
 
@@ -335,9 +334,6 @@ def handle_callback(cb):
     elif data == "status":
         out = read_statusline()
         send_result_and_menu(chat_id, out)
-    elif data == "health":
-        out = run_cs("health")
-        send_result_and_menu(chat_id, f"```\n{out}\n```")
     elif data == "restart-all":
         out = run_cs("restart-all", timeout=60)
         send_result_and_menu(chat_id, f"restart-all:\n{out}")
@@ -408,9 +404,6 @@ def handle_message(msg):
     elif text == "/list":
         out = run_cs("list")
         send_result_and_menu(chat_id, f"```\n{out}\n```")
-    elif text == "/health":
-        out = run_cs("health")
-        send_result_and_menu(chat_id, f"```\n{out}\n```")
     elif text == "/restart_all":
         out = run_cs("restart-all", timeout=60)
         send_result_and_menu(chat_id, f"restart-all:\n{out}")
@@ -429,7 +422,6 @@ def setup_commands():
         {"command": "menu", "description": "메인 메뉴"},
         {"command": "list", "description": "모든 세션 상태"},
         {"command": "status", "description": "토큰 사용량/리셋 타임"},
-        {"command": "health", "description": "stuck/rate-limit 감지"},
         {"command": "restart_all", "description": "모든 세션 재시작"},
     ]
     # 각 세션별 restart 명령도 자동 등록
