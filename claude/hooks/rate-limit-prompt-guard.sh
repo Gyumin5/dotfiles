@@ -51,6 +51,43 @@ fi
 # 1.5. bypass flag — 사용자가 임시로 90% 가드 무시하고 싶을 때
 BYPASS_GLOBAL=~/.claude/state/rate-limit-bypass.flag
 BYPASS_PROJ=~/.claude/state/rate-limit-bypass-${PROJ}.flag
+
+# 1.6. magic prompt — 텔레그램으로만 조작 가능하게 prompt에 명령 키워드 인식.
+# !bypass / !unbypass / !bypass-all / !unbypass-all 4가지. 모델 호출 없이 처리.
+mkdir -p "$(dirname "$BYPASS_GLOBAL")"
+notify_bypass() {
+    local msg="$1"
+    if [ -f "$TELEGRAM_ENV" ]; then
+        ( . "$TELEGRAM_ENV"
+          [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=8689118207" \
+            --data-urlencode "text=${msg}" >/dev/null 2>&1 )
+    fi
+}
+case "$USER_PROMPT" in
+    "!bypass")
+        touch "$BYPASS_PROJ"
+        notify_bypass "[${PROJ}] 90% 가드 bypass 활성. !unbypass 로 해제."
+        echo "rate-limit-guard: bypass-${PROJ} 활성" >&2
+        exit 2 ;;
+    "!unbypass")
+        rm -f "$BYPASS_PROJ"
+        notify_bypass "[${PROJ}] 90% 가드 bypass 해제."
+        echo "rate-limit-guard: bypass-${PROJ} 해제" >&2
+        exit 2 ;;
+    "!bypass-all")
+        touch "$BYPASS_GLOBAL"
+        notify_bypass "[${PROJ}] 90% 가드 bypass GLOBAL 활성 (모든 세션). !unbypass-all 로 해제."
+        echo "rate-limit-guard: bypass-global 활성" >&2
+        exit 2 ;;
+    "!unbypass-all")
+        rm -f "$BYPASS_GLOBAL"
+        notify_bypass "[${PROJ}] 90% 가드 bypass GLOBAL 해제."
+        echo "rate-limit-guard: bypass-global 해제" >&2
+        exit 2 ;;
+esac
+
 if [ -f "$BYPASS_GLOBAL" ] || [ -f "$BYPASS_PROJ" ]; then
     exit 0
 fi
