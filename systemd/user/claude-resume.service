@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/gmoh/resume
+Environment="CLAUDE_SESSION_NAME=resume"
 Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="TELEGRAM_STATE_DIR=/home/gmoh/resume/.claude/telegram"
 Environment="TERM=xterm-256color"

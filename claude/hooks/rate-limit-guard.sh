@@ -37,7 +37,12 @@ try:
   print(d.get("cwd") or "")
 except: print("")' 2>/dev/null)
 [ -z "$CWD" ] && CWD="$PWD"
-PROJ=$(basename "$CWD")
+# 세션 키 결정: 1) env, 2) cgroup으로 systemd unit 추적, 3) cwd basename
+PROJ="${CLAUDE_SESSION_NAME:-}"
+if [ -z "$PROJ" ]; then
+    PROJ=$(grep -oE 'claude-[^/]+\.service' /proc/self/cgroup 2>/dev/null | head -1 | sed 's/^claude-//; s/\.service$//')
+fi
+[ -z "$PROJ" ] && PROJ=$(basename "$CWD")
 ALERT_FLAG="${ALERT_FLAG_PREFIX}-${PROJ}.flag"
 PROJECT_TELEGRAM_ENV="${CWD}/.claude/telegram/.env"
 if [ -f "$PROJECT_TELEGRAM_ENV" ]; then
@@ -45,6 +50,12 @@ if [ -f "$PROJECT_TELEGRAM_ENV" ]; then
 else
     TELEGRAM_ENV="$FALLBACK_TELEGRAM_ENV"
 fi
+
+# 1.4. 보조 서비스는 차단 대상 아님 (progress-updater 등은 백그라운드 작업).
+case "$PROJ" in
+    progress-updater|rate-limit-recovery|daily-research|control-bot|watchdog|"")
+        exit 0 ;;
+esac
 
 # 1.5. bypass flag — 사용자가 임시로 90% 가드 무시하고 싶을 때
 BYPASS_GLOBAL=~/.claude/state/rate-limit-bypass.flag

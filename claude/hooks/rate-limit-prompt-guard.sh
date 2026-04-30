@@ -36,8 +36,19 @@ try:
   print(d.get("cwd") or "")
 except: print("")' 2>/dev/null)
 [ -z "$CWD" ] && CWD="$PWD"
-PROJ=$(basename "$CWD")
+# 세션 키 결정: 1) env, 2) cgroup으로 systemd unit 추적, 3) cwd basename
+PROJ="${CLAUDE_SESSION_NAME:-}"
+if [ -z "$PROJ" ]; then
+    PROJ=$(grep -oE 'claude-[^/]+\.service' /proc/self/cgroup 2>/dev/null | head -1 | sed 's/^claude-//; s/\.service$//')
+fi
+[ -z "$PROJ" ] && PROJ=$(basename "$CWD")
 QUEUE_FILE="$QUEUE_DIR/${PROJ}.jsonl"
+
+# 보조 서비스(progress-updater 등)는 큐잉/차단 대상 아님. 사용자 세션이 아니므로 통과.
+case "$PROJ" in
+    progress-updater|rate-limit-recovery|daily-research|control-bot|watchdog|"")
+        exit 0 ;;
+esac
 CWD_FILE="$QUEUE_DIR/${PROJ}.cwd"
 # 프로젝트별 telegram bot로 라우팅. recovery script가 큐 비어도 cwd 알 수 있게 매번 갱신.
 echo "$CWD" > "$CWD_FILE" 2>/dev/null
@@ -101,18 +112,15 @@ with open(sys.argv[2], "a") as f:
     # 큐 길이 계산
     QUEUE_LEN=$(wc -l < "$QUEUE_FILE" 2>/dev/null || echo 0)
 
-    # 텔레그램 알림 (5분 쿨다운, 프로젝트별)
+    # 텔레그램 알림 — 큐잉될 때마다 매번 (cooldown 제거). 사용자가 어떤 메시지가 어디로 큐잉됐는지 추적 가능하도록 prompt 미리보기 포함.
     ALERT_FLAG="${ALERT_FLAG_PREFIX}-${PROJ}.flag"
-    need_alert=true
-    if [ -f "$ALERT_FLAG" ]; then
-        age=$(( $(date +%s) - $(stat -c %Y "$ALERT_FLAG" 2>/dev/null || echo 0) ))
-        [ "$age" -lt "$COOLDOWN_SEC" ] && need_alert=false
-    fi
-
-    if [ "$need_alert" = true ] && [ -f "$TELEGRAM_ENV" ]; then
+    if [ -f "$TELEGRAM_ENV" ]; then
         . "$TELEGRAM_ENV"
         if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-            msg="rate-limit 차단 중. 메시지 큐잉됨 — 현재 큐 ${QUEUE_LEN}개. 풀리면 자동 처리."
+            preview=$(printf '%s' "$USER_PROMPT" | head -c 200)
+            msg="[${PROJ}] rate-limit 차단 중 — 메시지 큐잉됨 (큐 ${QUEUE_LEN}개). 풀리면 자동 처리.
+
+> ${preview}"
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
                 --data-urlencode "chat_id=8689118207" \
                 --data-urlencode "text=${msg}" >/dev/null 2>&1

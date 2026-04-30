@@ -58,15 +58,24 @@ if [ "$WAS_BLOCKED" = false ]; then
     exit 0
 fi
 
-# 차단 → 해제 전환. flag 제거 + bypass flag도 자동 정리 + 알림.
+# 차단 → 해제 전환. flag 제거.
 rm -f "$STATE_FLAG"
-# 사용자가 컨트롤봇으로 켜둔 bypass 는 리셋되면 자동 삭제 (가드를 다시 작동시키기 위함)
+# bypass flag 자동 정리는 "진짜 리셋(used_percentage=0)" 인 경우에만.
+# % 일시적 하락(92→89)에선 bypass 유지 — 사용자가 켜둔 의도가 살아있음.
 CLEARED_BYPASS=""
-for bf in ~/.claude/state/rate-limit-bypass.flag ~/.claude/state/rate-limit-bypass-*.flag; do
-    [ -f "$bf" ] || continue
-    rm -f "$bf"
-    CLEARED_BYPASS="${CLEARED_BYPASS}$(basename "$bf") "
-done
+TRUE_RESET=false
+if [ "$PCT_5H" = "0" ] && [ "$PCT_7D" = "0" ]; then
+    TRUE_RESET=true
+elif [ "$PCT_5H" = "0" ] && [ "$PCT_7D" -lt "$THRESHOLD_7D" ] 2>/dev/null; then
+    TRUE_RESET=true
+fi
+if [ "$TRUE_RESET" = true ]; then
+    for bf in ~/.claude/state/rate-limit-bypass.flag ~/.claude/state/rate-limit-bypass-*.flag; do
+        [ -f "$bf" ] || continue
+        rm -f "$bf"
+        CLEARED_BYPASS="${CLEARED_BYPASS}$(basename "$bf") "
+    done
+fi
 
 # 프로젝트별 알림: 각 프로젝트의 .claude/telegram/.env 사용해서 해당 봇으로만 보냄.
 # 큐 jsonl 옆 .cwd 파일에 prompt-guard가 cwd 기록해둠.
