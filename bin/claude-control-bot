@@ -137,8 +137,8 @@ def current_rate_limits():
             v = w.get("used_percentage")
             return int(round(v)) if isinstance(v, (int, float)) else -1
         p5, p7 = eff(fh), eff(sd)
-        r5 = datetime.fromtimestamp(fh.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if fh.get("resets_at") else "?"
-        r7 = datetime.fromtimestamp(sd.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if sd.get("resets_at") else "?"
+        r5 = _fmt_reset(datetime.fromtimestamp(fh.get("resets_at", 0), tz=kst)) if fh.get("resets_at") else "?"
+        r7 = _fmt_reset(datetime.fromtimestamp(sd.get("resets_at", 0), tz=kst)) if sd.get("resets_at") else "?"
         blocked = (p5 >= THRESHOLD_5H) or (p7 >= THRESHOLD_7D)
         return p5, p7, r5, r7, blocked
     except Exception:
@@ -254,6 +254,11 @@ def read_recent(name, max_turns=6, max_chars=3000):
     return result[:max_chars]
 
 
+_WD = ["월", "화", "수", "목", "금", "토", "일"]
+def _fmt_reset(dt):
+    return dt.strftime(f"%m/%d({_WD[dt.weekday()]}) %H:%M")
+
+
 def _pct_to_int(v):
     """소수점 잡음(55.00000000000001 같은 부동소수) 제거. 항상 0~100 정수로."""
     if isinstance(v, (int, float)):
@@ -279,8 +284,8 @@ def read_statusline():
             return _pct_to_int(w.get("used_percentage"))
 
         p5, p7 = eff_pct(rl5), eff_pct(rl7)
-        r5 = datetime.fromtimestamp(rl5.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if rl5.get("resets_at") else "?"
-        r7 = datetime.fromtimestamp(rl7.get("resets_at", 0), tz=kst).strftime("%m/%d %H:%M") if rl7.get("resets_at") else "?"
+        r5 = _fmt_reset(datetime.fromtimestamp(rl5.get("resets_at", 0), tz=kst)) if rl5.get("resets_at") else "?"
+        r7 = _fmt_reset(datetime.fromtimestamp(rl7.get("resets_at", 0), tz=kst)) if rl7.get("resets_at") else "?"
         usage_lines = [
             f"5h: {p5 if p5 is not None else '?'}% (리셋 {r5})",
             f"7d: {p7 if p7 is not None else '?'}% (리셋 {r7})",
