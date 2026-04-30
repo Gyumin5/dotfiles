@@ -92,7 +92,43 @@ def main_menu_markup():
          {"text": "📊 Status", "callback_data": "status"}],
         [{"text": "📜 Recent…", "callback_data": "menu:recent"},
          {"text": "🔄 Restart…", "callback_data": "menu:restart"}],
+        [{"text": "🚧 Bypass…", "callback_data": "menu:bypass"}],
     ]}
+
+
+BYPASS_DIR = Path.home() / ".claude" / "state"
+BYPASS_GLOBAL = BYPASS_DIR / "rate-limit-bypass.flag"
+
+
+def bypass_proj_flag(name):
+    # PROJ 키는 hook에서 basename($CWD) 사용. 세션 이름과 같지 않을 수 있어 WorkingDirectory에서 계산.
+    wd = service_workdir(name)
+    if not wd:
+        return None
+    proj = Path(wd).name
+    return BYPASS_DIR / f"rate-limit-bypass-{proj}.flag", proj
+
+
+def bypass_menu_markup():
+    BYPASS_DIR.mkdir(parents=True, exist_ok=True)
+    rows = []
+    g_on = BYPASS_GLOBAL.exists()
+    rows.append([{
+        "text": f"{'🟢' if g_on else '⚪'} GLOBAL (전체)",
+        "callback_data": "bypass-toggle:__global__",
+    }])
+    for name in list_sessions():
+        info = bypass_proj_flag(name)
+        if info is None:
+            continue
+        flag, proj = info
+        on = flag.exists()
+        rows.append([{
+            "text": f"{'🟢' if on else '⚪'} {name} ({proj})",
+            "callback_data": f"bypass-toggle:{name}",
+        }])
+    rows.append([{"text": "⬅ Back", "callback_data": "menu:main"}])
+    return {"inline_keyboard": rows}
 
 
 def service_workdir(name):
@@ -281,6 +317,29 @@ def handle_callback(cb):
     elif data == "menu:recent":
         api("editMessageText", chat_id=chat_id, message_id=message_id,
             text="최신 대화 볼 세션 선택:", reply_markup=session_menu_markup("recent"))
+    elif data == "menu:bypass":
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text="90% rate-limit 가드 bypass 토글 (🟢=ON, ⚪=OFF):",
+            reply_markup=bypass_menu_markup())
+    elif data.startswith("bypass-toggle:"):
+        target = data[len("bypass-toggle:"):]
+        BYPASS_DIR.mkdir(parents=True, exist_ok=True)
+        if target == "__global__":
+            if BYPASS_GLOBAL.exists():
+                BYPASS_GLOBAL.unlink()
+            else:
+                BYPASS_GLOBAL.touch()
+        else:
+            info = bypass_proj_flag(target)
+            if info is not None:
+                flag, _ = info
+                if flag.exists():
+                    flag.unlink()
+                else:
+                    flag.touch()
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text="90% rate-limit 가드 bypass 토글 (🟢=ON, ⚪=OFF):",
+            reply_markup=bypass_menu_markup())
     elif data.startswith("recent:"):
         name = data[len("recent:"):]
         out = read_recent(name)
