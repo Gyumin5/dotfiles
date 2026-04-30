@@ -41,16 +41,21 @@ QUEUE_FILE="$QUEUE_DIR/${PROJ}.jsonl"
 
 # 2. rate-limits 조회
 [ -f "$CACHE" ] || exit 0
+# used_percentage 외에 resets_at 으로 시간 fallback. now > resets_at 이면 이미 리셋.
 INFO=$(python3 -c '
-import json
+import json, time
 try:
   d = json.load(open("'"$CACHE"'"))
   rl = d.get("rate_limits", {})
   fh = rl.get("five_hour", {}); sd = rl.get("seven_day", {})
-  fh_pct = fh.get("used_percentage"); sd_pct = sd.get("used_percentage")
-  fh_pct = int(fh_pct) if isinstance(fh_pct, (int, float)) else -1
-  sd_pct = int(sd_pct) if isinstance(sd_pct, (int, float)) else -1
-  print("{}|{}".format(fh_pct, sd_pct))
+  now = time.time()
+  def effective(window):
+    rt = window.get("resets_at")
+    if rt and now > rt:
+      return 0
+    v = window.get("used_percentage")
+    return int(v) if isinstance(v, (int, float)) else -1
+  print("{}|{}".format(effective(fh), effective(sd)))
 except: print("-1|-1")' 2>/dev/null)
 PCT_5H=$(echo "$INFO" | cut -d'|' -f1)
 PCT_7D=$(echo "$INFO" | cut -d'|' -f2)

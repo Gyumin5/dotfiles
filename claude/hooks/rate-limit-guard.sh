@@ -45,7 +45,7 @@ esac
 # 3. 5h / 7d 사용량 체크 (둘 중 하나라도 임계 초과면 차단)
 [ -f "$CACHE" ] || exit 0
 INFO=$(python3 -c '
-import json, datetime
+import json, datetime, time
 def fmt_reset(ts):
   tz_kst = datetime.timezone(datetime.timedelta(hours=9))
   reset = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).astimezone(tz_kst)
@@ -59,9 +59,15 @@ try:
   d = json.load(open("'"$CACHE"'"))
   rl = d.get("rate_limits", {})
   fh = rl.get("five_hour", {}); sd = rl.get("seven_day", {})
-  fh_pct = fh.get("used_percentage"); sd_pct = sd.get("used_percentage")
-  fh_pct = int(fh_pct) if isinstance(fh_pct, (int, float)) else -1
-  sd_pct = int(sd_pct) if isinstance(sd_pct, (int, float)) else -1
+  now_ts = time.time()
+  def effective(window):
+    rt = window.get("resets_at")
+    if rt and now_ts > rt:
+      return 0
+    v = window.get("used_percentage")
+    return int(v) if isinstance(v, (int, float)) else -1
+  fh_pct = effective(fh)
+  sd_pct = effective(sd)
   fh_reset = fmt_reset(fh.get("resets_at")) if fh.get("resets_at") else "|"
   sd_reset = fmt_reset(sd.get("resets_at")) if sd.get("resets_at") else "|"
   print("{}|{}|{}|{}".format(fh_pct, sd_pct, fh_reset, sd_reset))
