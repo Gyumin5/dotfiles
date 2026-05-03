@@ -205,6 +205,16 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/telegram-reply-enforcer.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
