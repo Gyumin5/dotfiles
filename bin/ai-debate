@@ -249,10 +249,15 @@ def build_prior_block(prior_outputs):
     return "[이전 라운드 출력]\n" + json.dumps(summary, ensure_ascii=False, indent=2)[:10000]
 
 
-def run_round(round_idx, task, memory_block, prior_outputs, run_dir):
+def run_round(round_idx, task, memory_block, prior_outputs, run_dir, skip_agents=None):
+    """skip_agents: 이전 라운드에서 실패한 provider 제외하고 호출. 토큰·quota 절약."""
     prior_block = build_prior_block(prior_outputs)
+    skip_agents = skip_agents or set()
+    active_pool = [a for a in POOL if a not in skip_agents]
+    if not active_pool:
+        active_pool = POOL  # 둘 다 죽었어도 한 번은 시도
     tasks = []
-    for agent in POOL:
+    for agent in active_pool:
         for role in ROLES:
             label = f"r{round_idx}.{role}.{agent}"
             prompt = role_prompt(role, task, memory_block, prior_block)
@@ -278,10 +283,13 @@ def run_arbiter(task, memory_block, all_outputs, run_dir):
 def main():
     ap = argparse.ArgumentParser(description="ai-debate: 멀티 AI 합의 토론")
     ap.add_argument("task", help="토론할 task")
-    ap.add_argument("--max-rounds", type=int, default=3)
+    ap.add_argument("--max-rounds", type=int, default=1, help="기본 1라운드 (토큰 절약). --deep 시 3.")
+    ap.add_argument("--deep", action="store_true", help="고비용 모드: 3라운드 합의 시도. 명시 옵션 전용.")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--with-memory", action="store_true", help="프로젝트 메모리 주입 (기본: off)")
     args = ap.parse_args()
+    if args.deep:
+        args.max_rounds = max(args.max_rounds, 3)
 
     task = args.task
     if not sys.stdin.isatty():
@@ -309,12 +317,18 @@ def main():
     all_outputs = []
     final_consensus = False
     rounds_done = 0
+    skip_agents = set()  # 라운드 누적: 한 번이라도 모든 호출 실패한 provider는 다음 라운드부터 skip
     for round_idx in range(1, args.max_rounds + 1):
-        outs = run_round(round_idx, task, memory_block, all_outputs, run_dir)
+        outs = run_round(round_idx, task, memory_block, all_outputs, run_dir, skip_agents)
         (run_dir / f"r{round_idx}.outputs.json").write_text(
             json.dumps(outs, ensure_ascii=False, indent=2), encoding="utf-8")
         all_outputs.extend(outs)
         rounds_done = round_idx
+        # 이번 라운드에서 모든 role이 실패한 provider는 다음 라운드 skip 대상
+        for agent in POOL:
+            agent_outs = [o for o in outs if o.get("_agent") == agent]
+            if agent_outs and all("_error" in o for o in agent_outs):
+                skip_agents.add(agent)
         if consensus_reached(outs):
             final_consensus = True
             break
