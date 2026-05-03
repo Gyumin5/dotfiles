@@ -66,7 +66,12 @@ Bash timeout 600000ms. 응답 없이 진행 금지. 실패 시 해당 PID만 kil
 
 - HTML 열기: `google-chrome` (xdg-open 금지)
 - 경로 미지정 시 현재 프로젝트 내에서만 검색
-- 텔레그램 채널(<channel source="plugin:telegram:telegram">)로 들어온 메시지에는 반드시 mcp__plugin_telegram_telegram__reply 도구로 답할 것. 텍스트 응답만 하면 사용자는 못 봄. transcript 텍스트는 보조 수단일 뿐.
+- 텔레그램 채널 응답 IRON LAW (어기면 사용자 무응답 상태 발생):
+  · 메시지에 <channel source="plugin:telegram:telegram"> 태그가 있으면 그 메시지에 대한 모든 응답은 mcp__plugin_telegram_telegram__reply 도구 호출 1회 이상 필수.
+  · 텍스트만 출력하고 reply tool 호출 안 하는 것 절대 금지. 사용자는 transcript 못 봄. 침묵으로 인식됨.
+  · 작업이 길면 시작할 때 짧게 1회, 완료할 때 1회 — 최소 2번. 중간에 의미 있는 진행 보고도 reply로.
+  · 텔레그램 메시지가 한 턴에 여러 개 큐로 들어와도 각 메시지에 대해 별도 reply 응답.
+  · 도구 사용 중간에도 사용자에게 알릴 가치가 있는 정보면 reply로 즉시 전달.
 - 텔레그램 reply 후 터미널 확인 출력 금지
 - 텔레그램으로 명령어 보낼 때 백틱/코드펜스/들여쓰기 금지. 평문으로 한 줄씩, 앞 공백 없이. 복붙 가능하게. 터미널 `! ` 접두사는 Claude Code 안에서 돌릴 때만 명시하고 기본은 생략.
 - sudo 호출 절대 금지. systemd 서비스로 돌아가는 세션은 stdin이 없어 sudo가 패스워드 프롬프트에서 무한 대기 → 세션 데드락. 필요하면 사용자에게 평문 명령(앞 ! 없이)으로 알려주고 사용자가 터미널에서 실행. 권한 우회용 다른 패턴(pkexec, su, doas)도 동일 적용.
