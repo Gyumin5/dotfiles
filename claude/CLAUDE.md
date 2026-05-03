@@ -14,29 +14,21 @@
 
 ## AI 협업 (최우선)
 
-"AI/gemini/codex" 키워드는 다른 skill보다 우선.
+외부 AI(gemini/codex)를 부르는 모든 키워드는 ai-collaborate 단일 진입점으로 라우팅.
 
-- "gemini로/한테" → gemini-ask
-- "codex로/한테" → codex-ask
-- "AI 협업/크로스체크" → ai-collaborate (gemini + codex 둘 다 호출, 한쪽만 금지)
-- "코드/PR 리뷰" → /code-review
+- "AI/gemini/codex/AI 토론/협업/크로스체크/세컨드 오피니언/합의/비판자/AI한테 물어봐" → ai-collaborate
+- "코드/PR 리뷰" → /code-review (필요 시 ai-collaborate 병행)
 
-라우팅 객관 트리거 (키워드보다 우선):
-- 외부 최신 정보·웹 검색 필요 → Gemini (search 통합 강함). Gemini 429면 WebSearch fallback.
-- 코드 diff 50줄+ 또는 샌드박스 실행 필요 → Codex.
-- 파일 수정·생성·삭제 → Claude만. Codex/Gemini에 위임 금지 (--full-auto 등).
-- 의견 분기·세컨드 오피니언 필요 → ai-collaborate (둘 다).
-- 가벼운 한 단어/줄 답 → 어느 쪽이든 가능. AI 호출 자체 스킵 고려.
+gemini-ask / codex-ask 단독 호출 금지. 단일 질의 의도라도 ai-collaborate를 통해라. 두 AI를 병렬로 호출해야 한다고 판단되면 절대 ask 두 개 직접 부르지 말고 ai-collaborate 한 번 호출.
+
+ai-collaborate 호출 직전 한 줄 사전 고지 필수. 예: "ai-collaborate 호출 중, 수 분 소요". 고지 없이 바로 긴 호출 들어가지 않기. 호출 완료 후 결과 반드시 전달 (무응답 진행 금지).
+
+라우팅 객관 트리거 (Claude 직접 vs AI 호출):
+- 파일 수정·생성·삭제 → Claude만. Codex/Gemini에 위임 금지.
+- 외부 최신 정보가 필요해도 ai-collaborate (gemini가 검색하고 codex가 검토). WebSearch가 1차 시도 가능.
+- 가벼운 한 단어/줄 답 → Claude가 직접. AI 호출 스킵.
 
 Bash timeout 600000ms. 응답 없이 진행 금지. 실패 시 해당 PID만 kill 후 재시도 (pkill 금지).
-
-AI 호출 직전 한 줄 사전 고지 필수. 예: "gemini+codex 호출 중, 수 분 소요" / "codex-ask 호출 중". 고지 없이 바로 긴 호출 들어가지 않기. 호출 완료 후 결과 반드시 전달 (무응답 진행 금지).
-
-AI 래퍼 호출 규칙 (gemini-ask / codex-ask):
-- $1 프롬프트 인자는 항상 필수. `cat x | gemini-ask --new` 같이 인자 없이 호출 금지 (Usage 에러).
-- 큰 컨텍스트 + 짧은 지시 = stdin 파이프 + 짧은 arg. 예: `cat big.txt | codex-ask --new "요약해줘"`. 래퍼가 stdin을 프롬프트 앞에 자동 결합.
-- `"$(cat file)"` 방식은 ARG_MAX 128KB 한계 있음. 큰 프롬프트면 stdin 방식 사용.
-- heredoc + `$()` 중첩 금지 (한글 quoting 깨짐 + hang 유발).
 
 ## 플러그인/MCP 도입 보안 체크
 

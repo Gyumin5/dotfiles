@@ -114,8 +114,10 @@ with open(sys.argv[2], "a") as f:
 
     # 텔레그램 알림 — 큐잉될 때마다 매번 (cooldown 제거). 사용자가 어떤 메시지가 어디로 큐잉됐는지 추적 가능하도록 prompt 미리보기 포함.
     ALERT_FLAG="${ALERT_FLAG_PREFIX}-${PROJ}.flag"
-    if [ -f "$TELEGRAM_ENV" ]; then
-        . "$TELEGRAM_ENV"
+    CONTROL_BOT_ENV=~/.claude/control-bot/.env
+    if [ -f "$CONTROL_BOT_ENV" ]; then
+        . "$CONTROL_BOT_ENV"
+        TELEGRAM_BOT_TOKEN="${CONTROL_BOT_TOKEN:-}"
         if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
             preview=$(printf '%s' "$USER_PROMPT" | head -c 200)
             msg="[${PROJ}] rate-limit 차단 중 — 메시지 큐잉됨 (큐 ${QUEUE_LEN}개). 풀리면 자동 처리.

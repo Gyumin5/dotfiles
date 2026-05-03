@@ -77,26 +77,13 @@ if [ "$TRUE_RESET" = true ]; then
     done
 fi
 
-# 프로젝트별 알림: 각 프로젝트의 .claude/telegram/.env 사용해서 해당 봇으로만 보냄.
-# 큐 jsonl 옆 .cwd 파일에 prompt-guard가 cwd 기록해둠.
+# 알림은 컨트롤봇 한 채팅에 통합. 프로젝트 봇은 실제 대화만.
+CONTROL_BOT_ENV=~/.claude/control-bot/.env
 send_project_alert() {
     local proj="$1" cwd="$2" qcount="$3"
-    local env_file=""
-    if [ -n "$cwd" ] && [ -f "${cwd}/.claude/telegram/.env" ]; then
-        env_file="${cwd}/.claude/telegram/.env"
-    else
-        # cwd 모르면 흔한 위치 탐색
-        for cand in ~/${proj} ~/mon/${proj} ~/av-ros/test/${proj} ~/av-ros/${proj}; do
-            if [ -f "${cand}/.claude/telegram/.env" ]; then
-                env_file="${cand}/.claude/telegram/.env"
-                break
-            fi
-        done
-    fi
-    [ -f "$env_file" ] || env_file="$FALLBACK_TELEGRAM_ENV"
-    [ -f "$env_file" ] || return 0
-    ( . "$env_file"
-      if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    [ -f "$CONTROL_BOT_ENV" ] || return 0
+    ( . "$CONTROL_BOT_ENV"
+      if [ -n "${CONTROL_BOT_TOKEN:-}" ]; then
           local bypass_note=""
           [ -n "$CLEARED_BYPASS" ] && bypass_note=" (bypass flag 자동 해제: ${CLEARED_BYPASS})"
           if [ "$qcount" -gt 0 ]; then
@@ -104,7 +91,7 @@ send_project_alert() {
           else
               msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 비어있음."
           fi
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot${CONTROL_BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=8689118207" \
               --data-urlencode "text=${msg}" >/dev/null 2>&1
       fi
@@ -128,12 +115,12 @@ if [ -d "$QUEUE_DIR" ]; then
     done
 fi
 
-# 큐 있는 프로젝트가 하나도 없으면 fallback 봇으로 일반 알림 1회.
-if [ "$NOTIFIED" = false ] && [ -f "$FALLBACK_TELEGRAM_ENV" ]; then
-    . "$FALLBACK_TELEGRAM_ENV"
-    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+# 큐 있는 프로젝트가 하나도 없으면 컨트롤봇으로 일반 알림 1회.
+if [ "$NOTIFIED" = false ] && [ -f "$CONTROL_BOT_ENV" ]; then
+    . "$CONTROL_BOT_ENV"
+    if [ -n "${CONTROL_BOT_TOKEN:-}" ]; then
         msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%). 큐 비어있음."
-        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+        curl -s -X POST "https://api.telegram.org/bot${CONTROL_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=8689118207" \
             --data-urlencode "text=${msg}" >/dev/null 2>&1
     fi

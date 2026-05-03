@@ -1,6 +1,6 @@
 ---
 name: ai-collaborate
-description: Gemini + Codex 멀티 라운드 합의 토론. "AI 협업해줘", "크로스체크해줘", "세컨드 오피니언", "AI 토론", "합의할때까지", "비판자 포함" 등의 요청 시 자동 호출. 단일 진입점 — 매 호출이 비판자 포함 합의 토론.
+description: 모든 외부 AI 호출의 단일 진입점. Gemini + Codex 멀티 라운드 합의 토론. "AI 협업/크로스체크/세컨드오피니언/AI 토론/합의/비판자/gemini/codex/AI한테 물어봐" 등 외부 AI를 부르는 모든 키워드 시 자동 호출. gemini-ask·codex-ask 단독 사용 금지 — 의도가 단일 질의라도 ai-collaborate가 라우팅.
 disable-model-invocation: false
 effort: high
 ---

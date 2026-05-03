@@ -135,10 +135,12 @@ if [ -f "$ALERT_FLAG" ]; then
     [ "$age" -lt "$COOLDOWN_SEC" ] && need_alert=false
 fi
 
-if [ "$need_alert" = true ] && [ -f "$TELEGRAM_ENV" ]; then
-    . "$TELEGRAM_ENV"
+CONTROL_BOT_ENV=~/.claude/control-bot/.env
+if [ "$need_alert" = true ] && [ -f "$CONTROL_BOT_ENV" ]; then
+    . "$CONTROL_BOT_ENV"
+    TELEGRAM_BOT_TOKEN="${CONTROL_BOT_TOKEN:-}"
     if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-        msg="rate-limit-guard 작동. 모든 tool 차단 중 (telegram reply/edit/react/download만 허용).
+        msg="[${PROJ}] rate-limit-guard 작동. 모든 tool 차단 (telegram reply/edit/react/download만 허용).
 사유: ${TRIGGER}
 첫 차단 tool: ${TOOL:-?}"
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
