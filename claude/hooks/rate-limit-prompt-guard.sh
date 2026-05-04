@@ -23,6 +23,9 @@ FALLBACK_TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
 
 mkdir -p "$QUEUE_DIR"
 
+# 자동 작업(progress-updater 등 claude -p)은 큐잉 대상 아님.
+[ "${CLAUDE_AUTOMATED:-0}" = "1" ] && exit 0
+
 # 1. event JSON 읽기
 EVENT=$(cat 2>/dev/null || echo '{}')
 USER_PROMPT=$(printf '%s' "$EVENT" | python3 -c 'import json,sys

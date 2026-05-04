@@ -5,6 +5,9 @@
 
 set -uo pipefail
 
+# 자동 작업(claude -p 등)은 사용자 세션 아님 → reply 강제 스킵.
+[ "${CLAUDE_AUTOMATED:-0}" = "1" ] && exit 0
+
 EVENT=$(cat 2>/dev/null || echo '{}')
 
 # Python 스크립트는 stdin 충돌 피하려고 환경변수로 EVENT 전달.

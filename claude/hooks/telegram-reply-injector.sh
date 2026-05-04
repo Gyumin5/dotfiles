@@ -5,6 +5,9 @@
 
 set -uo pipefail
 
+# 자동 작업(progress-updater 등)에서 호출된 claude -p는 사용자 세션이 아니므로 스킵.
+[ "${CLAUDE_AUTOMATED:-0}" = "1" ] && exit 0
+
 EVENT=$(cat 2>/dev/null || echo '{}')
 PROMPT=$(printf '%s' "$EVENT" | python3 -c 'import json,sys
 try:

@@ -4,6 +4,9 @@
 
 set -uo pipefail
 
+# 자동 작업은 브리핑 주입 스킵.
+[ "${CLAUDE_AUTOMATED:-0}" = "1" ] && exit 0
+
 INPUT=$(cat 2>/dev/null || echo '{}')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 [ -z "$CWD" ] && CWD="$PWD"
