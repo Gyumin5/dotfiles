@@ -135,10 +135,9 @@ if [ -f "$ALERT_FLAG" ]; then
     [ "$age" -lt "$COOLDOWN_SEC" ] && need_alert=false
 fi
 
-CONTROL_BOT_ENV=~/.claude/control-bot/.env
-if [ "$need_alert" = true ] && [ -f "$CONTROL_BOT_ENV" ]; then
-    . "$CONTROL_BOT_ENV"
-    TELEGRAM_BOT_TOKEN="${CONTROL_BOT_TOKEN:-}"
+# 프로젝트별 봇으로 직접 알림 (각 세션 채팅에 자기 알림만 보이게).
+if [ "$need_alert" = true ] && [ -f "$TELEGRAM_ENV" ]; then
+    . "$TELEGRAM_ENV"
     if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
         msg="[${PROJ}] rate-limit-guard 작동. 모든 tool 차단 (telegram reply/edit/react/download만 허용).
 사유: ${TRIGGER}

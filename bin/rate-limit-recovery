@@ -77,21 +77,32 @@ if [ "$TRUE_RESET" = true ]; then
     done
 fi
 
-# 알림은 컨트롤봇 한 채팅에 통합. 프로젝트 봇은 실제 대화만.
-CONTROL_BOT_ENV=~/.claude/control-bot/.env
+# 알림은 각 프로젝트 봇 채팅으로 송신 (사용자: 각 세션 알림은 그 세션 봇으로).
 send_project_alert() {
     local proj="$1" cwd="$2" qcount="$3"
-    [ -f "$CONTROL_BOT_ENV" ] || return 0
-    ( . "$CONTROL_BOT_ENV"
-      if [ -n "${CONTROL_BOT_TOKEN:-}" ]; then
+    local env_file=""
+    if [ -n "$cwd" ] && [ -f "${cwd}/.claude/telegram/.env" ]; then
+        env_file="${cwd}/.claude/telegram/.env"
+    else
+        for cand in ~/${proj} ~/mon/${proj} ~/av-ros/test/${proj} ~/av-ros/${proj}; do
+            if [ -f "${cand}/.claude/telegram/.env" ]; then
+                env_file="${cand}/.claude/telegram/.env"
+                break
+            fi
+        done
+    fi
+    [ -f "$env_file" ] || env_file="$FALLBACK_TELEGRAM_ENV"
+    [ -f "$env_file" ] || return 0
+    ( . "$env_file"
+      if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
           local bypass_note=""
           [ -n "$CLEARED_BYPASS" ] && bypass_note=" (bypass flag 자동 해제: ${CLEARED_BYPASS})"
           if [ "$qcount" -gt 0 ]; then
-              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 ${qcount}개 대기. 아무 메시지나 보내면 자동 처리됨."
+              msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 ${qcount}개 대기. 아무 메시지나 보내면 자동 처리됨."
           else
-              msg="[${proj}] rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 비어있음."
+              msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 비어있음."
           fi
-          curl -s -X POST "https://api.telegram.org/bot${CONTROL_BOT_TOKEN}/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=8689118207" \
               --data-urlencode "text=${msg}" >/dev/null 2>&1
       fi
@@ -115,7 +126,9 @@ if [ -d "$QUEUE_DIR" ]; then
     done
 fi
 
-# 큐 있는 프로젝트가 하나도 없으면 컨트롤봇으로 일반 알림 1회.
+# 큐 비어있어도 해제 사실은 컨트롤봇 한 채팅에 1회 표시 (모든 프로젝트 알림 분산되어
+# 어디서도 안 받으면 사용자가 해제 시각 모를 수 있음). 큐 있는 프로젝트별 알림과 별개.
+CONTROL_BOT_ENV=~/.claude/control-bot/.env
 if [ "$NOTIFIED" = false ] && [ -f "$CONTROL_BOT_ENV" ]; then
     . "$CONTROL_BOT_ENV"
     if [ -n "${CONTROL_BOT_TOKEN:-}" ]; then
