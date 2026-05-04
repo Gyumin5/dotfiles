@@ -192,6 +192,10 @@
           {
             "type": "command",
             "command": "/home/gmoh/.claude/hooks/inject-briefing.sh"
+          },
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/telegram-reply-injector.sh"
           }
         ]
       }
