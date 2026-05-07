@@ -79,6 +79,17 @@ Bash timeout 600000ms. 응답 없이 진행 금지. 실패 시 해당 PID만 kil
 - 오래 걸릴 수 있는 bash 명령(빌드, 학습, 실험 스크립트, 큰 테스트, 다운로드, 원격 동기화 등)은 항상 `run_in_background=true`로 실행. 포그라운드 block 금지 — 텔레그램 응답 중단 → 세션 stuck 원인. 확실치 않으면 백그라운드 우선. 짧은 명령(<30s)만 foreground.
 - 완료·통과·정상 선언 전에 해당 검증 명령(테스트/빌드/lint/재현) 실행하고 출력 확인. 출력 없이 "동작할 것 같다"로 선언 금지.
 
+## 큰 입력 방어 (Prompt too long 예방)
+
+세션이 1M 토큰 한도 넘어가면 "Prompt is too long" 영구 stuck. 단일 read·tool_result로 컨텍스트 폭증할 수 있어 다음 룰 강제.
+
+- PDF: 한 번에 5페이지 이내씩만 read. 첫 호출은 목차·서론만, 필요한 챕터만 추가 read. `pages=1-5` 식으로 명시.
+- 긴 로그·텍스트: head/tail/sort/awk로 줄여서. `cat <large.log>` 통째 금지. grep 결과도 `| head -50` 같이 제한.
+- 큰 코드 파일: ctx_read 의 `mode='signatures'` 또는 `mode='lines:N-M'` 활용. 통째 read 금지.
+- 큰 텍스트 분석은 stdin 파이프로 ai-collaborate 외부 AI 처리 → 우리 컨텍스트 안 늘어남.
+- 작업 시작 전 파일 크기 확인 (wc -l, du -h). 5MB 또는 1만 줄 넘으면 잘라 읽기.
+- 텔레그램 attachment 큰 거 받으면 download 후 위 룰대로 처리. 통째 read 금지.
+
 ## 세션 / 압축
 
 압축 직후 IRON LAW (위반 금지):
