@@ -77,8 +77,27 @@ PAGES=$(pdfinfo main.pdf | awk '/^Pages:/ {print $2}')
        추가 6문장, 제거 0문장, fig2(가장 큰 이미지)만 width=0.85\textwidth, 나머지는 원본 유지.
 ```
 
-## Do not
-- 사용자 결과·결론·수치 임의 변경.
-- 수식·인용·레이블·참고문헌 항목 추가/삭제.
-- 백업 없이 첫 편집 시작.
-- max iteration 도달 후 무시하고 계속.
+## Do not — 절대 금지
+페이지 조정은 오직 두 가지 수단만 사용:
+1) 본문 글의 양 (문장 추가/제거)
+2) \includegraphics width 값 (이미지 사이즈)
+
+다음은 어떤 경우에도 건드리지 않는다 (논문 포맷 보존):
+- \documentclass 옵션 (10pt, 11pt 등 폰트 크기)
+- \usepackage{geometry} 의 margin/textwidth/textheight
+- \linespread, \baselinestretch, \setstretch
+- \setlength{\parskip}, \setlength{\parindent}
+- \columnsep, \columnwidth (multi-column 레이아웃)
+- \titlespacing, section 헤더 spacing
+- \abovecaptionskip, \belowcaptionskip
+- bibliography style, \bibliographystyle
+- figure/table placement specifier ([t], [b], [h], [!htbp]) — 단 정말 강한 부유 문제 있으면 사용자에게 물어보고 수정
+
+기타 금지:
+- 사용자 결과·결론·수치 임의 변경
+- 수식·인용·레이블·참고문헌 항목 추가/삭제
+- \vspace, \hspace, \\\\ 같은 강제 spacing 트릭으로 페이지 맞추기 (이건 포맷 변형으로 간주)
+- 백업 없이 첫 편집 시작
+- max iteration 도달 후 무시하고 계속
+
+원칙: "이 논문을 다른 사람이 봤을 때 포맷이 그대로다, 단지 본문이 좀 더 길거나 짧고 이미지 크기가 다를 뿐이다"가 종료 조건.
