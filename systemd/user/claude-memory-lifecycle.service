@@ -1,0 +1,10 @@
+[Unit]
+Description=Claude Memory Lifecycle (progress→history promotion + archive, daily, DRY_RUN 기본)
+
+[Service]
+Type=oneshot
+Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DRY_RUN=1"
+ExecStart=/home/gmoh/.local/bin/claude-memory-lifecycle all
+StandardOutput=append:/home/gmoh/.claude/logs/memory-lifecycle.log
+StandardError=append:/home/gmoh/.claude/logs/memory-lifecycle.log
