@@ -128,6 +128,15 @@
             "command": "/home/gmoh/.claude/hooks/block-ai-after-compact.sh"
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/large-read-guard.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
