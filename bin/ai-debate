@@ -38,6 +38,8 @@ POOL = ["codex", "gemini"]
 ROLES = ["debater", "critic"]
 TIMEOUT = 600
 RUN_BASE = Path.home() / ".claude" / "state" / "ai-debate"
+CACHE_DIR = RUN_BASE / "cache"
+CACHE_TTL_SEC = 24 * 3600
 
 SCHEMAS = {
     "debater": ["position", "reasoning", "evidence", "verification", "confidence"],
@@ -287,6 +289,7 @@ def main():
     ap.add_argument("--deep", action="store_true", help="고비용 모드: 3라운드 합의 시도. 명시 옵션 전용.")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--with-memory", action="store_true", help="프로젝트 메모리 주입 (기본: off)")
+    ap.add_argument("--no-cache", action="store_true", help="24h 캐시 무시하고 새로 토론")
     args = ap.parse_args()
     if args.deep:
         args.max_rounds = max(args.max_rounds, 3)
@@ -296,6 +299,29 @@ def main():
         stdin_data = sys.stdin.read().strip()
         if stdin_data:
             task = stdin_data + "\n\n---\n\n" + task
+
+    # 24h 캐시 검사 (--no-cache 또는 --seed 명시 시 우회)
+    if not args.no_cache and args.seed is None:
+        import hashlib
+        cache_key_src = json.dumps({
+            "task": task,
+            "max_rounds": args.max_rounds,
+            "with_memory": args.with_memory,
+        }, ensure_ascii=False, sort_keys=True)
+        cache_key = hashlib.sha256(cache_key_src.encode("utf-8")).hexdigest()[:16]
+        cache_path = CACHE_DIR / f"{cache_key}.json"
+        if cache_path.is_file() and (time.time() - cache_path.stat().st_mtime) < CACHE_TTL_SEC:
+            try:
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                age_min = int((time.time() - cache_path.stat().st_mtime) / 60)
+                print(f"=== ai-debate CACHE HIT (age {age_min}min, ttl {CACHE_TTL_SEC//3600}h) ===")
+                print(f"original run: {cached.get('run_id','?')}")
+                print(f"--no-cache 로 강제 재토론 가능.")
+                print()
+                print(cached.get("summary_text", "(empty)"))
+                return
+            except Exception:
+                pass  # cache 깨졌으면 재토론
 
     seed = args.seed if args.seed is not None else int(time.time())
     rng = random.Random(seed)  # reserved for future role rotation seed
@@ -349,11 +375,15 @@ def main():
     (run_dir / "final_result.json").write_text(
         json.dumps(final, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # human summary
-    print(f"=== ai-debate run {run_id} ===")
-    print(f"rounds={rounds_done}/{args.max_rounds} consensus={final_consensus}")
-    print(f"artifacts={run_dir}")
-    print()
+    # human summary (also captured for cache)
+    summary_lines = []
+    def _p(s=""):
+        summary_lines.append(s)
+        print(s)
+    _p(f"=== ai-debate run {run_id} ===")
+    _p(f"rounds={rounds_done}/{args.max_rounds} consensus={final_consensus}")
+    _p(f"artifacts={run_dir}")
+    _p()
 
     # 라운드별 한 줄 요약
     for r in range(1, rounds_done + 1):
@@ -369,36 +399,47 @@ def main():
                 sp = o.get("should_proceed")
                 crit_sp.append(f"{o.get('_agent')}={'OK' if sp in (True, 'true', 'yes', 'Y', 'y', 'True', '예', 1) else 'NO'}")
         errs = [f"{o.get('_agent')}/{o.get('_role')}:{o['_error']}" for o in all_outputs if o.get("_round") == r and "_error" in o]
-        print(f"R{r}  debaters: {' | '.join(deb_pos) or '-'}")
-        print(f"     critics : {' | '.join(crit_sp) or '-'}")
+        _p(f"R{r}  debaters: {' | '.join(deb_pos) or '-'}")
+        _p(f"     critics : {' | '.join(crit_sp) or '-'}")
         if errs:
-            print(f"     errors  : {' ; '.join(errs)}")
-        print()
+            _p(f"     errors  : {' ; '.join(errs)}")
+        _p()
 
     # arbiter 최종 결정
     if "_error" in arb:
-        print(f"ARBITER FAILED: {arb['_error']}")
+        _p(f"ARBITER FAILED: {arb['_error']}")
         return
-    print("--- ARBITER (codex) ---")
+    _p("--- ARBITER (codex) ---")
     fd = arb.get("final_decision", "(no decision)")
-    print(f"FINAL: {fd}")
+    _p(f"FINAL: {fd}")
     rationale = arb.get("rationale", "")
     if rationale:
-        print(f"  rationale: {rationale}")
+        _p(f"  rationale: {rationale}")
     steps = arb.get("action_steps")
     if steps:
         if isinstance(steps, list):
-            print("  action_steps:")
+            _p("  action_steps:")
             for s in steps:
-                print(f"    - {s}")
+                _p(f"    - {s}")
         else:
-            print(f"  action_steps: {steps}")
+            _p(f"  action_steps: {steps}")
     vp = arb.get("verification_plan")
     if vp:
-        print(f"  verification_plan: {vp}")
+        _p(f"  verification_plan: {vp}")
     dissent = arb.get("dissent")
     if dissent:
-        print(f"  dissent: {dissent}")
+        _p(f"  dissent: {dissent}")
+
+    # cache 기록 (--no-cache 또는 --seed 명시 시 skip)
+    if not args.no_cache and args.seed is None:
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps({
+                "run_id": run_id,
+                "summary_text": "\n".join(summary_lines),
+            }, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
