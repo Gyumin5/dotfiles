@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""claude-session-healthcheck — 활성 세션 30분 무응답 감지 + 알림.
+
+매 15분 timer가 호출. 각 systemd claude-*.service 활성 세션에 대해:
+- /proc/<pid>/cwd 에서 cwd 얻고 ~/.claude/projects/<key>/ 의 최근 .jsonl 파일 찾기
+- 마지막 user/assistant ts, 마지막 tool_use 후 매칭되는 tool_result 없으면 in-flight
+- 30분 이상 응답 없고 in-flight tool 도 없으면 컨트롤봇으로 알림 (PaperVelocity 누출 후
+  알림 정책: 컨트롤봇 한 채팅으로만)
+- 세션별 60분 쿨다운
+
+알림 내용:
+- 세션명, 마지막 활동(분), stop hook 발화 여부, jsonl 마지막 event type, systemd 상태
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+THRESHOLD_NO_ACTIVITY_SEC = 30 * 60
+ALERT_COOLDOWN_SEC = 60 * 60
+TOOL_INFLIGHT_WINDOW_SEC = 5 * 60
+EXCLUDE_SERVICES = {
+    "claude-watchdog.service",
+    "claude-control-bot.service",
+    "claude-progress-updater.service",
+    "claude-rate-limit-recovery.service",
+    "claude-session-healthcheck.service",
+    "claude-daily-research.service",
+}
+STATE_DIR = Path.home() / ".claude" / "state"
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+CONTROL_BOT_ENV = Path.home() / ".claude" / "control-bot" / ".env"
+CONTROL_CHAT_ID = "8689118207"
+
+
+def load_control_token():
+    if not CONTROL_BOT_ENV.is_file():
+        return None
+    try:
+        for line in CONTROL_BOT_ENV.read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                if k.strip() == "CONTROL_BOT_TOKEN":
+                    return v.strip().strip('"').strip("'")
+    except Exception:
+        return None
+    return None
+
+
+def telegram_alert(token, text):
+    if not token:
+        return False
+    try:
+        import urllib.parse
+        import urllib.request
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = urllib.parse.urlencode(
+            {"chat_id": CONTROL_CHAT_ID, "text": text}
+        ).encode()
+        req = urllib.request.Request(url, data=data, method="POST")
+        urllib.request.urlopen(req, timeout=5).read()
+        return True
+    except Exception:
+        return False
+
+
+def list_active_services():
+    try:
+        out = subprocess.run(
+            [
+                "systemctl",
+                "--user",
+                "list-units",
+                "--type=service",
+                "--state=active",
+                "--no-legend",
+                "--plain",
+                "claude-*.service",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+    except Exception:
+        return []
+    services = []
+    for line in out.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        svc = parts[0]
+        if svc in EXCLUDE_SERVICES:
+            continue
+        services.append(svc)
+    return services
+
+
+def service_main_pid(svc):
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "show", "-p", "MainPID", "--value", svc],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        pid = int(out)
+        return pid if pid > 0 else None
+    except Exception:
+        return None
+
+
+def proc_cwd(pid):
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except Exception:
+        return None
+
+
+def project_key(cwd):
+    return cwd.replace("/", "-").replace("_", "-")
+
+
+def latest_jsonl(proj_dir):
+    if not proj_dir.is_dir():
+        return None
+    candidates = [
+        p
+        for p in proj_dir.glob("*.jsonl")
+        if p.is_file() and "archive" not in p.parts
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def parse_jsonl_tail(path, n=200):
+    """Return last n parsed events from jsonl."""
+    try:
+        size = path.stat().st_size
+    except Exception:
+        return []
+    chunk = min(size, 256 * 1024)  # 마지막 256KB
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, size - chunk))
+            raw = f.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+    lines = raw.splitlines()[-n:]
+    events = []
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            events.append(json.loads(ln))
+        except Exception:
+            continue
+    return events
+
+
+def event_ts(ev):
+    """Return unix ts from event timestamp string, or None."""
+    ts = ev.get("timestamp")
+    if not ts:
+        return None
+    try:
+        if ts.endswith("Z"):
+            from datetime import datetime, timezone
+
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        from datetime import datetime
+
+        return datetime.fromisoformat(ts).timestamp()
+    except Exception:
+        return None
+
+
+def analyze_session(events):
+    """From parsed events, return dict with last_user_ts, last_assistant_ts,
+    inflight_tool_use (bool), last_event_type."""
+    last_user = None
+    last_assistant = None
+    last_event_type = None
+    pending_tool_use_ts = None
+    matched_tool_use_ids = set()
+    pending_tool_use_ids = []  # list of (id, ts)
+
+    for ev in events:
+        t = ev.get("type")
+        last_event_type = t or last_event_type
+        ts = event_ts(ev)
+        if t == "user":
+            msg = ev.get("message", {}) or {}
+            content = msg.get("content")
+            # 진짜 user는 tool_result 가 아닌 것
+            is_real_user = False
+            if isinstance(content, str):
+                is_real_user = True
+            elif isinstance(content, list):
+                for it in content:
+                    if isinstance(it, dict):
+                        if it.get("type") == "tool_result" or "tool_use_id" in it:
+                            tid = it.get("tool_use_id")
+                            if tid:
+                                matched_tool_use_ids.add(tid)
+                            continue
+                        is_real_user = True
+                        break
+            if is_real_user and ts:
+                last_user = ts
+        elif t == "assistant":
+            if ts:
+                last_assistant = ts
+            msg = ev.get("message", {}) or {}
+            content = msg.get("content") or []
+            if isinstance(content, list):
+                for it in content:
+                    if isinstance(it, dict) and it.get("type") == "tool_use":
+                        tid = it.get("id")
+                        if tid:
+                            pending_tool_use_ids.append((tid, ts))
+
+    # in-flight: pending tool_use 가 매칭 안 됨 + 5분 이내
+    now = time.time()
+    inflight = False
+    for tid, tts in pending_tool_use_ids:
+        if tid in matched_tool_use_ids:
+            continue
+        if tts and (now - tts) < TOOL_INFLIGHT_WINDOW_SEC:
+            inflight = True
+            break
+
+    return {
+        "last_user_ts": last_user,
+        "last_assistant_ts": last_assistant,
+        "last_event_type": last_event_type,
+        "inflight": inflight,
+    }
+
+
+def cooldown_ok(svc):
+    flag = STATE_DIR / f"healthcheck-alert-{svc}.flag"
+    if flag.exists():
+        if (time.time() - flag.stat().st_mtime) < ALERT_COOLDOWN_SEC:
+            return False
+    return True
+
+
+def mark_alert(svc):
+    flag = STATE_DIR / f"healthcheck-alert-{svc}.flag"
+    flag.touch()
+
+
+def main():
+    token = load_control_token()
+    services = list_active_services()
+    if not services:
+        return
+
+    findings = []
+    for svc in services:
+        pid = service_main_pid(svc)
+        if not pid:
+            continue
+        cwd = proc_cwd(pid)
+        if not cwd:
+            continue
+        proj_dir = Path.home() / ".claude" / "projects" / project_key(cwd)
+        jl = latest_jsonl(proj_dir)
+        if not jl:
+            continue
+        events = parse_jsonl_tail(jl, n=300)
+        info = analyze_session(events)
+        last_act = max(
+            x for x in (info["last_user_ts"], info["last_assistant_ts"], jl.stat().st_mtime) if x is not None
+        )
+        idle = time.time() - last_act
+        if idle < THRESHOLD_NO_ACTIVITY_SEC:
+            continue
+        if info["inflight"]:
+            continue
+        # last event 가 이미 user (사용자 발화 후 응답 없는) 상태여야 진짜 stuck
+        # assistant 가 마지막이면 사용자가 아무 말 안 한 거라 정상
+        if info["last_event_type"] != "user":
+            continue
+        if not cooldown_ok(svc):
+            continue
+        name = svc.replace("claude-", "").replace(".service", "")
+        msg = (
+            f"[healthcheck] {name} 무응답 {int(idle/60)}분.\n"
+            f"jsonl: {jl.name}\n"
+            f"마지막 event: {info['last_event_type']}\n"
+            f"in-flight tool: {info['inflight']}\n"
+            f"cwd: {cwd}\n"
+            f"조치: 컨트롤봇 → 해당 세션 menu → restart 또는 nudge."
+        )
+        if telegram_alert(token, msg):
+            mark_alert(svc)
+            findings.append(name)
+
+    if findings:
+        print(f"[healthcheck] alerted: {','.join(findings)}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

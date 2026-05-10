@@ -1,0 +1,9 @@
+[Unit]
+Description=Claude Session Healthcheck (15분마다 활성 세션 무응답 감지)
+
+[Service]
+Type=oneshot
+Environment="PATH=/home/gmoh/.bun/bin:/home/gmoh/.nvm/versions/node/v22.17.0/bin:/home/gmoh/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/gmoh/.local/bin/claude-session-healthcheck
+StandardOutput=append:/home/gmoh/.claude/logs/session-healthcheck.log
+StandardError=append:/home/gmoh/.claude/logs/session-healthcheck.log
