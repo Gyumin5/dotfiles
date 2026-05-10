@@ -183,6 +183,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "/home/gmoh/.claude/hooks/prompt-length-guard.sh"
+          },
+          {
+            "type": "command",
             "command": "/home/gmoh/.claude/hooks/rate-limit-prompt-guard.sh"
           },
           {
