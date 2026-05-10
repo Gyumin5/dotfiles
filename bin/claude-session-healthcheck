@@ -276,17 +276,24 @@ def main():
             continue
         events = parse_jsonl_tail(jl, n=300)
         info = analyze_session(events)
-        last_act = max(
-            x for x in (info["last_user_ts"], info["last_assistant_ts"], jl.stat().st_mtime) if x is not None
-        )
+        # idle 계산: 마지막 user/assistant ts 만 사용. jsonl mtime 은 queue-operation
+        # 이벤트로 갱신될 수 있어서 false-negative (intensitylio 5/10 hang 사고).
+        last_act_candidates = [info["last_user_ts"], info["last_assistant_ts"]]
+        last_act_candidates = [x for x in last_act_candidates if x is not None]
+        if not last_act_candidates:
+            continue
+        last_act = max(last_act_candidates)
         idle = time.time() - last_act
         if idle < THRESHOLD_NO_ACTIVITY_SEC:
             continue
         if info["inflight"]:
             continue
-        # last event 가 이미 user (사용자 발화 후 응답 없는) 상태여야 진짜 stuck
-        # assistant 가 마지막이면 사용자가 아무 말 안 한 거라 정상
-        if info["last_event_type"] != "user":
+        # 사용자 발화 후 응답 없는 상태일 때만 알림.
+        # 마지막 user_ts 가 마지막 assistant_ts 보다 최근이어야 stuck.
+        if info["last_assistant_ts"] and info["last_user_ts"]:
+            if info["last_assistant_ts"] >= info["last_user_ts"]:
+                continue
+        elif info["last_event_type"] != "user":
             continue
         if not cooldown_ok(svc):
             continue
