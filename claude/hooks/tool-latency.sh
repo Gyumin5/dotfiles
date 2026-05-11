@@ -58,8 +58,14 @@ if [ "$TOOL" = "Bash" ] && [ "$DUR" -gt 60000 ] 2>/dev/null; then
             TOKEN=$(grep '^CONTROL_BOT_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'"' ')
             CHAT_ID="8689118207"
             if [ -n "$TOKEN" ]; then
-                proj=$(basename "$CWD" 2>/dev/null)
-                text="[bash-latency] ${proj:-unknown} 세션에서 foreground bash 60s+ 호출 ${count}회 누적. 자율루프 안이면 run_in_background=true 점검. 마지막 명령: ${cmd:0:80}"
+                # systemd cgroup 에서 claude-<name>.service 추출 (cwd basename 보다 정확).
+                unit=$(grep -oE 'claude-[a-z0-9_-]+\.service' /proc/self/cgroup 2>/dev/null | head -1)
+                if [ -n "$unit" ]; then
+                    name="${unit#claude-}"; name="${name%.service}"
+                else
+                    name=$(basename "$CWD" 2>/dev/null)
+                fi
+                text="[bash-latency] ${name:-unknown} 세션에서 foreground bash 60s+ 호출 ${count}회 누적. 자율루프 안이면 run_in_background=true 점검. cwd=$CWD 마지막 명령: ${cmd:0:80}"
                 curl -sS --max-time 5 \
                     -d "chat_id=$CHAT_ID" \
                     --data-urlencode "text=$text" \
