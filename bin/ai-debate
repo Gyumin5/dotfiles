@@ -34,7 +34,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-POOL = ["codex", "gemini"]
+POOL = ["codex", "gemini", "claude"]
+# 격리 HOME — claude 호출 시에만 사용. 부모 ~/.claude.json 변경 회피 + plugin sync 충돌 차단.
+# PoC 2026-05-12: 19s 응답, 유효 JSON, 부모 plugin:telegram disconnect 0건.
+CLAUDE_ISO_HOME = "/home/gmoh/.claude-iso"
 ROLES = ["debater", "critic"]
 TIMEOUT = 600
 RUN_BASE = Path.home() / ".claude" / "state" / "ai-debate"
@@ -181,12 +184,43 @@ def call_agent(agent, role, prompt, run_dir, label):
     try:
         if agent == "gemini":
             cmd = ["gemini-ask", "--new", "위 지시대로 JSON만 출력"]
+            env = os.environ.copy()
+            env["AI_OUT_RAW"] = "1"
         elif agent == "codex":
             cmd = ["codex-ask", "--new", "위 지시대로 JSON만 출력"]
+            env = os.environ.copy()
+            env["AI_OUT_RAW"] = "1"
+        elif agent == "claude":
+            # 격리 HOME으로 부모 세션 plugin sync 충돌 회피. prompt 본문에 schema 강제 포함.
+            cmd = ["/home/gmoh/.local/bin/claude", "-p", prompt]
+            env = {
+                "HOME": CLAUDE_ISO_HOME,
+                "XDG_CONFIG_HOME": f"{CLAUDE_ISO_HOME}/.config",
+                "XDG_DATA_HOME": f"{CLAUDE_ISO_HOME}/.local/share",
+                "XDG_STATE_HOME": f"{CLAUDE_ISO_HOME}/.local/state",
+                "PATH": "/home/gmoh/.local/bin:/usr/local/bin:/usr/bin:/bin",
+                "TERM": "dumb",
+            }
+            # claude는 stdin 안 받음 — prompt를 -p 인자로 직접 전달
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=TIMEOUT, env=env, cwd="/tmp",
+            )
+            raw = proc.stdout + ("\n[stderr]\n" + proc.stderr if proc.stderr.strip() else "")
+            raw_path.write_text(raw, encoding="utf-8")
+            if proc.returncode != 0:
+                return {"_error": f"{agent} exit {proc.returncode}", "_duration": round(time.time() - started, 2), "_agent": agent, "_role": role}
+            parsed = parse_json_loose(proc.stdout)
+            if parsed is None:
+                return {"_error": f"{agent} JSON parse failed", "_raw": proc.stdout[:300], "_duration": round(time.time() - started, 2), "_agent": agent, "_role": role}
+            parsed["_agent"] = agent
+            parsed["_role"] = role
+            parsed["_duration"] = round(time.time() - started, 2)
+            norm_path = run_dir / f"{label}.normalized.json"
+            norm_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+            return parsed
         else:
             return {"_error": f"unknown agent {agent}", "_duration": 0, "_agent": agent, "_role": role}
-        env = os.environ.copy()
-        env["AI_OUT_RAW"] = "1"
         proc = subprocess.run(
             cmd, input=prompt, capture_output=True, text=True,
             timeout=TIMEOUT, env=env,
