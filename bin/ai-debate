@@ -38,25 +38,80 @@ POOL = ["codex", "gemini", "claude"]
 # 격리 HOME — claude 호출 시에만 사용. 부모 ~/.claude.json 변경 회피 + plugin sync 충돌 차단.
 # PoC 2026-05-12: 19s 응답, 유효 JSON, 부모 plugin:telegram disconnect 0건.
 CLAUDE_ISO_HOME = "/home/gmoh/.claude-iso"
-ROLES = ["debater", "critic"]
+ROLES = ["debater", "critic"]  # legacy default. 동적 모드는 ROLE_REGISTRY 참조.
 TIMEOUT = 600
 RUN_BASE = Path.home() / ".claude" / "state" / "ai-debate"
 CACHE_DIR = RUN_BASE / "cache"
 CACHE_TTL_SEC = 24 * 3600
 
-SCHEMAS = {
-    "debater": ["position", "reasoning", "evidence", "verification", "confidence"],
-    "critic": ["weakest_assumption", "counter_examples", "missed_risks", "should_proceed", "reasoning"],
-    "arbiter": [
-        "final_decision",
-        "rationale",
-        "action_steps",
-        "verification_plan",
-        "delegation_target",
-        "stop_condition",
-        "dissent",
-    ],
+# 동적 다역할 시스템 (2026-05-12, arbiter 합의 run-20260512T053815Z).
+# critic 항상 강제 포함. integrator는 arbiter와 책임 중복으로 제외.
+ROLE_REGISTRY = {
+    "debater": {
+        "instructions": (
+            "당신은 토론자(debater). 주어진 task에 대해 자신의 의견을 제시하라. "
+            "구체 근거(evidence)와 검증 방법(verification)을 포함하라. confidence는 0.0~1.0."
+        ),
+        "schema": ["position", "reasoning", "evidence", "verification", "confidence"],
+        "auto_priority": 100,
+    },
+    "critic": {
+        "instructions": (
+            "당신은 비판자(critic). 다른 역할 출력의 가장 약한 가정, 반증, 누락 risk를 찾아라. "
+            "should_proceed는 진행 안전 판정. 동의에 휘둘리지 말고 적대적 시각."
+        ),
+        "schema": ["weakest_assumption", "counter_examples", "missed_risks", "should_proceed", "reasoning"],
+        "auto_priority": 100,  # 항상 강제 추가
+    },
+    "surveyor": {
+        "instructions": (
+            "당신은 조사자(surveyor). task와 관련된 외부 자료·최신 트렌드·관련 기존 연구·도구를 "
+            "최대한 구체적으로 정리하라. 출처(url 또는 명칭)를 evidence로 남겨라."
+        ),
+        "schema": ["findings", "sources", "key_trends", "gaps", "confidence"],
+        "auto_priority": 60,
+    },
+    "methodology": {
+        "instructions": (
+            "당신은 방법론 평가자(methodology). 제안된 접근의 실험 설계·재현성·통계·평가 metric의 "
+            "타당성을 점검하라. 결함이 있으면 구체적 대안 제시."
+        ),
+        "schema": ["soundness", "design_flaws", "alternatives", "reproducibility", "confidence"],
+        "auto_priority": 50,
+    },
+    "risk_analyst": {
+        "instructions": (
+            "당신은 리스크 분석자(risk_analyst). 실현 가능성·운영 리스크·실패 모드·롤백 비용을 점검. "
+            "각 risk에 likelihood(low/med/high), impact, mitigation 제시."
+        ),
+        "schema": ["risks", "failure_modes", "mitigations", "overall_risk", "confidence"],
+        "auto_priority": 70,
+    },
+    "novelty": {
+        "instructions": (
+            "당신은 참신성 평가자(novelty). 제안이 기존 연구·도구·내부 결정과 어떻게 다른지, "
+            "차별 가치가 있는지 판정. 중복이면 명시."
+        ),
+        "schema": ["differentiation", "prior_art", "novel_value", "redundancy_risk", "confidence"],
+        "auto_priority": 30,
+    },
 }
+
+SCHEMAS = {role: cfg["schema"] for role, cfg in ROLE_REGISTRY.items()}
+SCHEMAS["arbiter"] = [
+    "final_decision",
+    "rationale",
+    "action_steps",
+    "verification_plan",
+    "delegation_target",
+    "stop_condition",
+    "dissent",
+    # 신규 (동적 다역할용, 선택적). 무옵션 호환 위해 파싱은 둘 다 허용.
+    "risks",
+    "open_questions",
+    "role_coverage",
+    "call_budget_used",
+]
 
 
 def now_iso():
@@ -82,26 +137,22 @@ def project_memory():
 
 def role_prompt(role, task, memory_block, prior_block):
     schema_keys = SCHEMAS[role]
-    if role == "debater":
+    if role in ROLE_REGISTRY:
+        instructions = ROLE_REGISTRY[role]["instructions"]
+    elif role == "arbiter":
         instructions = (
-            "당신은 토론자(debater). 주어진 task에 대해 자신의 의견을 제시하라. "
-            "구체 근거(evidence)와 검증 방법(verification 명령 또는 절차)을 포함하라. "
-            "confidence는 0.0~1.0."
-        )
-    elif role == "critic":
-        instructions = (
-            "당신은 비판자(critic). 토론자들의 의견을 받아 가장 약한 가정, 반증 사례, "
-            "놓친 risk를 찾아라. should_proceed는 합의대로 진행해도 안전한지 판정. "
-            "동의에 휘둘리지 말고 적대적 시각으로."
-        )
-    else:
-        instructions = (
-            "당신은 아비터(arbiter). 모든 라운드 출력을 받아 최종 결정을 내려라. "
+            "당신은 아비터(arbiter). 모든 역할·라운드 출력을 받아 최종 결정을 내려라. "
             "action_steps는 실행 가능한 단계, verification_plan은 결정이 옳았는지 확인하는 방법. "
             "delegation_target은 이 결정을 실제로 수행할 주체 (self·Claude·codex·gemini·human·subagent 중 하나, 단순 결정 정리면 'none'). "
-            "stop_condition은 이 작업을 언제 중단/완료해야 하는지 (시간 임계·실패 횟수·신호 발생·완료 신호 등 명시적 종료 조건; 무한 위임 루프 차단용). "
-            "dissent에 합의 안 된 부분 명시."
+            "stop_condition은 이 작업을 언제 중단/완료해야 하는지. "
+            "역할별 합의/이견을 통합하되 per-agent(codex/gemini/claude) 라벨링은 출력하지 말 것. "
+            "risks(주요 위험 목록), open_questions(미해결 질문), role_coverage(어느 역할이 어떤 기여를 했는지 요약, 에이전트 이름 없이), "
+            "call_budget_used(예: '12/24'), dissent(채택 안 된 의견)을 채워라. "
+            "동적 역할이 아닌 경우(debater+critic만) risks/open_questions/role_coverage/call_budget_used는 빈 값 또는 생략 가능."
         )
+    else:
+        # 알 수 없는 역할 — fallback
+        instructions = f"역할: {role}. 주어진 task에 답하라."
 
     parts = [f"역할: {role}", "", instructions, ""]
     if memory_block:
@@ -295,16 +346,17 @@ def build_prior_block(prior_outputs):
     return "[이전 라운드 출력]\n" + json.dumps(summary, ensure_ascii=False, indent=2)[:10000]
 
 
-def run_round(round_idx, task, memory_block, prior_outputs, run_dir, skip_agents=None):
-    """skip_agents: 이전 라운드에서 실패한 provider 제외하고 호출. 토큰·quota 절약."""
+def run_round(round_idx, task, memory_block, prior_outputs, run_dir, skip_agents=None, roles=None):
+    """skip_agents: 이전 라운드에서 실패한 provider 제외. roles: None이면 ROLES 기본."""
     prior_block = build_prior_block(prior_outputs)
     skip_agents = skip_agents or set()
     active_pool = [a for a in POOL if a not in skip_agents]
     if not active_pool:
-        active_pool = POOL  # 둘 다 죽었어도 한 번은 시도
+        active_pool = POOL
+    roles = roles or ROLES
     tasks = []
     for agent in active_pool:
-        for role in ROLES:
+        for role in roles:
             label = f"r{round_idx}.{role}.{agent}"
             prompt = role_prompt(role, task, memory_block, prior_block)
             tasks.append((agent, role, prompt, label))
@@ -326,6 +378,67 @@ def run_arbiter(task, memory_block, all_outputs, run_dir):
     return out
 
 
+def run_planner(task, max_roles, run_dir):
+    """auto-roles: codex가 ROLE_REGISTRY 안에서 필요한 역할 N개(≤max_roles) 선정.
+    critic은 호출 측이 강제 추가하므로 planner는 제외해도 됨. 실패 시 [debater]만 반환."""
+    available = [r for r in ROLE_REGISTRY.keys() if r != "critic"]
+    instr = (
+        "당신은 역할 플래너. 주어진 task에 대해 ai-debate 다역할 토론에서 사용할 역할을 "
+        f"아래 목록에서만 최대 {max_roles}개 선택하라. 불확실하면 [debater]만 선택. "
+        "critic은 자동 강제 추가되므로 선택할 필요 없음. integrator는 사용 금지(arbiter와 중복).\n"
+        f"가능한 역할: {', '.join(available)}\n"
+        "출력은 다음 JSON만:\n"
+        '{"roles": ["debater", ...], "reasoning": "<짧게>"}'
+    )
+    prompt = instr + "\n\n[task]\n" + task
+    label = "planner"
+    raw_path = run_dir / f"{label}.raw.txt"
+    prompt_path = run_dir / f"{label}.prompt.txt"
+    prompt_path.write_text(prompt, encoding="utf-8")
+    try:
+        proc = subprocess.run(
+            ["codex-ask", "--new", "위 지시대로 JSON만 출력"],
+            input=prompt, capture_output=True, text=True,
+            timeout=TIMEOUT, env={**os.environ, "AI_OUT_RAW": "1"},
+        )
+        raw_path.write_text(proc.stdout + ("\n[stderr]\n" + proc.stderr if proc.stderr.strip() else ""),
+                            encoding="utf-8")
+        if proc.returncode != 0:
+            return ["debater"]
+        obj = parse_json_loose(proc.stdout)
+        if not obj or "roles" not in obj:
+            return ["debater"]
+        picked = [r for r in obj["roles"] if r in ROLE_REGISTRY and r != "critic"]
+        if not picked:
+            return ["debater"]
+        return picked[:max_roles]
+    except Exception:
+        return ["debater"]
+
+
+def select_roles(task, args, run_dir):
+    """반환: (roles 리스트, source 라벨). critic은 항상 끝에 추가."""
+    explicit = (args.roles or "").strip()
+    if explicit:
+        items = [r.strip() for r in explicit.split(",") if r.strip()]
+        unknown = [r for r in items if r not in ROLE_REGISTRY]
+        if unknown:
+            print(f"ERROR: 알 수 없는 역할: {unknown}. 가능: {list(ROLE_REGISTRY.keys())}", file=sys.stderr)
+            sys.exit(2)
+        roles = [r for r in items if r != "critic"]
+        if "critic" not in roles:
+            roles.append("critic")
+        return roles, "explicit"
+    if args.auto_roles:
+        picked = run_planner(task, args.max_roles, run_dir)
+        roles = [r for r in picked if r != "critic"]
+        if "critic" not in roles:
+            roles.append("critic")
+        return roles[:args.max_roles + 1], "auto"  # +1 for critic
+    # 무옵션: 기존 호환 — debater+critic 그대로
+    return ["debater", "critic"], "default"
+
+
 def main():
     ap = argparse.ArgumentParser(description="ai-debate: 멀티 AI 합의 토론")
     ap.add_argument("task", help="토론할 task")
@@ -334,6 +447,15 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--with-memory", action="store_true", help="프로젝트 메모리 주입 (기본: off)")
     ap.add_argument("--no-cache", action="store_true", help="24h 캐시 무시하고 새로 토론")
+    ap.add_argument("--roles", default=None,
+                    help=f"명시 역할 (쉼표). critic 자동 추가. 가능: {','.join(ROLE_REGISTRY.keys())}")
+    ap.add_argument("--auto-roles", action="store_true",
+                    help="planner LLM이 task 보고 자동 선정 (critic 자동 추가)")
+    ap.add_argument("--max-roles", type=int, default=4, help="자동선정 시 역할 상한 (기본 4)")
+    ap.add_argument("--max-total-calls", type=int, default=24,
+                    help="planner 포함 총 콜 예산 (기본 24). 초과 시 시작 전 중단.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="planner+선택역할+예상콜수만 출력, 실제 에이전트 호출 안 함")
     args = ap.parse_args()
     if args.deep:
         args.max_rounds = max(args.max_rounds, 3)
@@ -379,21 +501,45 @@ def main():
     run_dir = RUN_BASE / f"run-{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "task.txt").write_text(task, encoding="utf-8")
+
+    # 역할 선정 (planner 호출이 필요할 수 있어 run_dir 생성 후)
+    selected_roles, roles_source = select_roles(task, args, run_dir)
+    # 예산 가드: planner_call(0 or 1) + len(roles) * len(POOL) * rounds + arbiter(1)
+    planner_calls = 1 if roles_source == "auto" else 0
+    estimated_calls = planner_calls + len(selected_roles) * len(POOL) * args.max_rounds + 1
+    budget_used_msg = f"{estimated_calls}/{args.max_total_calls}"
+
     (run_dir / "meta.json").write_text(json.dumps({
-        "seed": seed, "started": run_id, "pool": POOL, "roles": ROLES,
+        "seed": seed, "started": run_id, "pool": POOL,
+        "roles": selected_roles, "roles_source": roles_source,
+        "estimated_calls": estimated_calls, "max_total_calls": args.max_total_calls,
         "max_rounds": args.max_rounds, "memory_attached": bool(memory_block),
-        # CLAUDE_CODE_SESSION_ID: claude 2.1.132+ 가 Bash subprocess 에 자동 주입.
-        # 어느 세션이 ai-debate 호출했는지 추적용 (사고 회고 시 cross-session 상관).
         "parent_session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
         "parent_cwd": str(Path.cwd()),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    if estimated_calls > args.max_total_calls:
+        print(f"ERROR: 예상 콜 {estimated_calls} > max-total-calls {args.max_total_calls}. 중단.", file=sys.stderr)
+        print(f"  roles={selected_roles} pool={POOL} rounds={args.max_rounds}", file=sys.stderr)
+        sys.exit(3)
+
+    if args.dry_run:
+        print(f"=== ai-debate DRY-RUN ===")
+        print(f"run_id: {run_id}")
+        print(f"roles_source: {roles_source}")
+        print(f"selected_roles: {selected_roles}")
+        print(f"pool: {POOL}")
+        print(f"max_rounds: {args.max_rounds}")
+        print(f"estimated_calls: {estimated_calls} (max {args.max_total_calls})")
+        print(f"run_dir: {run_dir}")
+        return
+
     all_outputs = []
     final_consensus = False
     rounds_done = 0
-    skip_agents = set()  # 라운드 누적: 한 번이라도 모든 호출 실패한 provider는 다음 라운드부터 skip
+    skip_agents = set()
     for round_idx in range(1, args.max_rounds + 1):
-        outs = run_round(round_idx, task, memory_block, all_outputs, run_dir, skip_agents)
+        outs = run_round(round_idx, task, memory_block, all_outputs, run_dir, skip_agents, roles=selected_roles)
         (run_dir / f"r{round_idx}.outputs.json").write_text(
             json.dumps(outs, ensure_ascii=False, indent=2), encoding="utf-8")
         all_outputs.extend(outs)
@@ -403,11 +549,25 @@ def main():
             agent_outs = [o for o in outs if o.get("_agent") == agent]
             if agent_outs and all("_error" in o for o in agent_outs):
                 skip_agents.add(agent)
-        if consensus_reached(outs):
+        if "debater" in selected_roles and "critic" in selected_roles and consensus_reached(outs):
             final_consensus = True
             break
 
-    # arbiter는 항상 최종 정리자 역할 (option B)
+    # 부분 실패 임계: 성공 콜 / 예정 콜 < 2/3 이면 arbiter 안 부르고 실패 종료.
+    expected_round_calls = len(selected_roles) * len(POOL) * rounds_done
+    success_calls = sum(1 for o in all_outputs if "_error" not in o)
+    if expected_round_calls > 0 and success_calls * 3 < expected_round_calls * 2:
+        print(f"ERROR: 성공 콜 {success_calls}/{expected_round_calls} < 2/3. arbiter 건너뛰고 실패 종료.", file=sys.stderr)
+        (run_dir / "final_result.json").write_text(json.dumps({
+            "run_id": run_id, "run_dir": str(run_dir),
+            "rounds_done": rounds_done, "consensus_reached": False,
+            "partial_failure": True, "success_calls": success_calls,
+            "expected_calls": expected_round_calls,
+            "outputs": all_outputs,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        sys.exit(4)
+
+    # arbiter는 항상 최종 정리자
     arb = run_arbiter(task, memory_block, all_outputs, run_dir)
     all_outputs.append(arb)
 
@@ -430,27 +590,38 @@ def main():
         print(s)
     _p(f"=== ai-debate run {run_id} ===")
     _p(f"rounds={rounds_done}/{args.max_rounds} consensus={final_consensus}")
+    _p(f"roles={selected_roles} ({roles_source}) budget={budget_used_msg}")
     _p(f"artifacts={run_dir}")
     _p()
 
-    # 라운드별 한 줄 요약
+    # 라운드별 요약. 무옵션(legacy)이면 기존 per-agent 라벨 유지, 동적이면 역할별 집계.
+    is_legacy = roles_source == "default"
     for r in range(1, rounds_done + 1):
-        deb_pos = []
-        crit_sp = []
-        for o in all_outputs:
-            if o.get("_round") != r or "_error" in o:
-                continue
-            if o.get("_role") == "debater":
-                p = (o.get("position", "") or "").strip()[:60]
-                deb_pos.append(f"{o.get('_agent')}={p}")
-            elif o.get("_role") == "critic":
-                sp = o.get("should_proceed")
-                crit_sp.append(f"{o.get('_agent')}={'OK' if sp in (True, 'true', 'yes', 'Y', 'y', 'True', '예', 1) else 'NO'}")
-        errs = [f"{o.get('_agent')}/{o.get('_role')}:{o['_error']}" for o in all_outputs if o.get("_round") == r and "_error" in o]
-        _p(f"R{r}  debaters: {' | '.join(deb_pos) or '-'}")
-        _p(f"     critics : {' | '.join(crit_sp) or '-'}")
-        if errs:
-            _p(f"     errors  : {' ; '.join(errs)}")
+        if is_legacy:
+            deb_pos = []
+            crit_sp = []
+            for o in all_outputs:
+                if o.get("_round") != r or "_error" in o:
+                    continue
+                if o.get("_role") == "debater":
+                    p = (o.get("position", "") or "").strip()[:60]
+                    deb_pos.append(f"{o.get('_agent')}={p}")
+                elif o.get("_role") == "critic":
+                    sp = o.get("should_proceed")
+                    crit_sp.append(f"{o.get('_agent')}={'OK' if sp in (True, 'true', 'yes', 'Y', 'y', 'True', '예', 1) else 'NO'}")
+            errs = [f"{o.get('_agent')}/{o.get('_role')}:{o['_error']}" for o in all_outputs if o.get("_round") == r and "_error" in o]
+            _p(f"R{r}  debaters: {' | '.join(deb_pos) or '-'}")
+            _p(f"     critics : {' | '.join(crit_sp) or '-'}")
+            if errs:
+                _p(f"     errors  : {' ; '.join(errs)}")
+        else:
+            # 역할별 성공/실패 카운트만 (per-agent 라벨 제거)
+            _p(f"R{r}")
+            for role in selected_roles:
+                role_outs = [o for o in all_outputs if o.get("_round") == r and o.get("_role") == role]
+                ok = sum(1 for o in role_outs if "_error" not in o)
+                fail = len(role_outs) - ok
+                _p(f"   {role:14s} ok={ok} fail={fail}")
         _p()
 
     # arbiter 최종 결정
@@ -480,6 +651,16 @@ def main():
     sc = arb.get("stop_condition")
     if sc:
         _p(f"  stop_condition: {sc}")
+    # 신규 다역할 필드 (있으면 출력)
+    for k in ("risks", "open_questions", "role_coverage", "call_budget_used"):
+        v = arb.get(k)
+        if v:
+            if isinstance(v, list):
+                _p(f"  {k}:")
+                for s in v:
+                    _p(f"    - {s}")
+            else:
+                _p(f"  {k}: {v}")
     dissent = arb.get("dissent")
     if dissent:
         _p(f"  dissent: {dissent}")
