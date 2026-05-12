@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    },
     "arxiv-latex": {
       "command": "bash",
       "args": [
@@ -21,10 +13,6 @@
         "-c",
         "cd ~/.local/share/mcp/academic-search-mcp && uv run server.py"
       ]
-    },
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
     }
   }
 }
