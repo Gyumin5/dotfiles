@@ -171,7 +171,9 @@ history.md
   - 근거: (필수, 한 줄)
   - 되돌릴 조건: (있으면)
   - 실험/실패: (다시 시도 시 시간 낭비인 경우만)
+  - Prediction: (사고 가드 관련 변경에서만 필수) <사고 클래스>가 <기간> 동안 telemetry/history 상 재발하지 않으면 성공, 재발하면 재검토.
   ```
+- Prediction 적용 범위: prompt-length / large-read / secrets-scan / rate-limit / progress-updater drift / cross-session leak / stuck-loop / bash-latency 등 명시적 사고 가드 변경. 일반 commit·기능 추가에는 강제 안 함. (Agentic Harness Engineering paper의 decision observability 부분 도입, 2026-05-12.)
 - 규칙
   - 결정 + 근거는 짝. "결정"만 있는 항목 금지
   - 실패는 모두 남기지 말 것. "다시 시도하면 시간 낭비하는 실패"만 negative decision으로 기록
