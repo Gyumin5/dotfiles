@@ -41,23 +41,6 @@ except: pass
         systemctl --user kill -s KILL "$_svc" 2>/dev/null
       fi
     fi
-    # trap: 셸 종료 시 같은 경로에 다른 claude 없으면 service 재기동.
-    # 다른 cl 세션이 이미 이 프로젝트를 잡고 있으면 service 재기동을 생략해서
-    # 충돌/중복 세션 방지.
-    trap '
-      _pwd_exit='"'$_pwd'"'
-      _svc_exit='"'$_svc'"'
-      for _pp in $(pgrep -f "^claude.*--remote-control" 2>/dev/null); do
-        _cwd_exit=$(readlink /proc/$_pp/cwd 2>/dev/null)
-        if [ "$_cwd_exit" = "$_pwd_exit" ]; then
-          echo "[cl] 다른 cl 세션($_pp) 살아있음 → service 재기동 생략"
-          exit 0
-        fi
-      done
-      echo "[cl] systemd $_svc_exit restart"
-      systemctl --user reset-failed "$_svc_exit" 2>/dev/null
-      systemctl --user start "$_svc_exit"
-    ' EXIT INT
   fi
 
   # 같은 경로에서 돌아가는 다른 터미널 cl 세션이 있으면 강제 종료 (봇 토큰 경쟁 방지)
@@ -91,5 +74,25 @@ except: pass
   # 시그널로 죽은 경우(128+)는 그대로 종료해야 다른 cl에게 뺏긴 뒤 여기서 또 살아나는 사고 방지.
   if [ "$_ec" -eq 1 ]; then
     claude $_base_args
+    _ec=$?
+  fi
+
+  # claude 종료 직후 systemd 서비스 재기동. (이전 trap EXIT 방식은 함수 종료가
+  # 아니라 셸 종료 시에만 발동되는 버그. cl 함수 끝나는 시점에 즉시 처리.)
+  # 시그널로 죽은 경우(128+)는 다른 cl이 가로챈 가능성 → 재기동 생략.
+  if systemctl --user list-unit-files "$_svc.service" 2>/dev/null | grep -q "$_svc" \
+     && [ "$_ec" -lt 128 ]; then
+    local _other=0
+    for _p in $(pgrep -f "^claude.*--remote-control" 2>/dev/null); do
+      _cwd=$(readlink "/proc/$_p/cwd" 2>/dev/null)
+      if [ "$_cwd" = "$_pwd" ]; then _other=1; break; fi
+    done
+    if [ "$_other" -eq 0 ]; then
+      echo "[cl] systemd $_svc restart"
+      systemctl --user reset-failed "$_svc" 2>/dev/null
+      systemctl --user start "$_svc"
+    else
+      echo "[cl] 다른 cl 세션 살아있음 → service 재기동 생략"
+    fi
   fi
 }
