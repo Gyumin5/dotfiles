@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""claude-telegram-healthcheck — 프로젝트 봇 inbound 좀비 감시.
+
+원리: getUpdates 는 ack 안 한 update 큐를 보여준다. 정상 bun 은 long-poll 로
+즉시 가져가서 큐가 비어 있다. pending ≥ 1 + 가장 오래된 메시지가 ZOMBIE_AGE_SEC
+초 이상이면 좀비로 판정하고 컨트롤봇으로 알림.
+
+자동 restart 안 함 — 진행 중 컨텍스트 보호. 알림만.
+
+쿨다운: 세션별 ALERT_COOLDOWN_SEC.
+"""
+
+import json
+import subprocess
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+ZOMBIE_AGE_SEC = 60
+ALERT_COOLDOWN_SEC = 3600
+HTTP_TIMEOUT = 8
+
+CONTROL_BOT_ENV = Path.home() / ".claude" / "control-bot" / ".env"
+CONTROL_CHAT_ID = "8689118207"
+STATE_DIR = Path.home() / ".claude" / "state" / "telegram-healthcheck"
+
+
+def load_env_file(path):
+    out = {}
+    try:
+        for line in Path(path).read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return out
+
+
+def load_control_token():
+    return load_env_file(CONTROL_BOT_ENV).get("CONTROL_BOT_TOKEN")
+
+
+def telegram_post(token, chat_id, text):
+    if not token:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = urllib.parse.urlencode(
+            {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
+        ).encode()
+        req = urllib.request.Request(url, data=data, method="POST")
+        urllib.request.urlopen(req, timeout=HTTP_TIMEOUT).read()
+        return True
+    except Exception:
+        return False
+
+
+def list_claude_services():
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "list-units", "--type=service",
+             "--all", "--no-legend", "--plain"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:
+        return []
+    services = []
+    for line in out.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        unit = parts[0]
+        if not unit.startswith("claude-") or not unit.endswith(".service"):
+            continue
+        if unit == "claude-control-bot.service":
+            continue
+        # only loaded units
+        if "loaded" not in line and "active" not in line:
+            continue
+        services.append(unit)
+    return services
+
+
+def svc_telegram_state_dir(unit):
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "show", "-p", "Environment", "--value", unit],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        return None
+    for tok in out.split():
+        if tok.startswith("TELEGRAM_STATE_DIR="):
+            return tok.split("=", 1)[1]
+    return None
+
+
+def fetch_pending(token):
+    """Return list of pending updates (no ack). Empty list if healthy or error."""
+    try:
+        url = (
+            f"https://api.telegram.org/bot{token}/getUpdates"
+            f"?limit=10&timeout=0"
+        )
+        with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as r:
+            data = json.loads(r.read())
+        if not data.get("ok"):
+            return None
+        return data.get("result", [])
+    except Exception:
+        return None
+
+
+def oldest_message_age(updates):
+    now = int(time.time())
+    ages = []
+    for u in updates:
+        m = u.get("message") or u.get("edited_message") or u.get("channel_post") or {}
+        ts = m.get("date")
+        if ts:
+            ages.append(now - int(ts))
+    return max(ages) if ages else 0
+
+
+def cooldown_ok(unit):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    f = STATE_DIR / f"{unit}.alerted"
+    if not f.is_file():
+        return True
+    age = time.time() - f.stat().st_mtime
+    return age >= ALERT_COOLDOWN_SEC
+
+
+def mark_alerted(unit):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    (STATE_DIR / f"{unit}.alerted").touch()
+
+
+def main():
+    control_token = load_control_token()
+    results = []
+    for unit in list_claude_services():
+        state_dir = svc_telegram_state_dir(unit)
+        if not state_dir:
+            continue
+        env_path = Path(state_dir) / ".env"
+        if not env_path.is_file():
+            continue
+        env = load_env_file(env_path)
+        token = env.get("TELEGRAM_BOT_TOKEN") or env.get("BOT_TOKEN")
+        if not token:
+            continue
+        pending = fetch_pending(token)
+        if pending is None:
+            results.append((unit, "api_error", 0, 0))
+            continue
+        n = len(pending)
+        age = oldest_message_age(pending) if pending else 0
+        zombie = n >= 1 and age >= ZOMBIE_AGE_SEC
+        results.append((unit, "zombie" if zombie else "ok", n, age))
+        if zombie and cooldown_ok(unit):
+            session = unit.replace("claude-", "").replace(".service", "")
+            msg = (
+                f"⚠ telegram-healthcheck: {session} bun 좀비 의심\n"
+                f"pending={n}, oldest_age={age}s (임계 {ZOMBIE_AGE_SEC}s)\n"
+                f"권고: cs restart {session}"
+            )
+            if telegram_post(control_token, CONTROL_CHAT_ID, msg):
+                mark_alerted(unit)
+    # one-line summary to stdout (for journalctl)
+    summary = " | ".join(f"{u}:{s}:p{n}/a{a}" for u, s, n, a in results)
+    print(summary or "no-services")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

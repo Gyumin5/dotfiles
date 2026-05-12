@@ -1,0 +1,9 @@
+[Unit]
+Description=Claude Telegram Healthcheck (프로젝트 봇 inbound 좀비 감시)
+
+[Service]
+Type=oneshot
+Environment="PATH=/home/gmoh/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/gmoh/.local/bin/claude-telegram-healthcheck
+StandardOutput=append:/home/gmoh/.claude/logs/telegram-healthcheck.log
+StandardError=append:/home/gmoh/.claude/logs/telegram-healthcheck.log
