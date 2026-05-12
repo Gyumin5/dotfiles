@@ -44,7 +44,15 @@ CACHE_TTL_SEC = 24 * 3600
 SCHEMAS = {
     "debater": ["position", "reasoning", "evidence", "verification", "confidence"],
     "critic": ["weakest_assumption", "counter_examples", "missed_risks", "should_proceed", "reasoning"],
-    "arbiter": ["final_decision", "rationale", "action_steps", "verification_plan", "dissent"],
+    "arbiter": [
+        "final_decision",
+        "rationale",
+        "action_steps",
+        "verification_plan",
+        "delegation_target",
+        "stop_condition",
+        "dissent",
+    ],
 }
 
 
@@ -87,6 +95,8 @@ def role_prompt(role, task, memory_block, prior_block):
         instructions = (
             "당신은 아비터(arbiter). 모든 라운드 출력을 받아 최종 결정을 내려라. "
             "action_steps는 실행 가능한 단계, verification_plan은 결정이 옳았는지 확인하는 방법. "
+            "delegation_target은 이 결정을 실제로 수행할 주체 (self·Claude·codex·gemini·human·subagent 중 하나, 단순 결정 정리면 'none'). "
+            "stop_condition은 이 작업을 언제 중단/완료해야 하는지 (시간 임계·실패 횟수·신호 발생·완료 신호 등 명시적 종료 조건; 무한 위임 루프 차단용). "
             "dissent에 합의 안 된 부분 명시."
         )
 
@@ -426,6 +436,12 @@ def main():
     vp = arb.get("verification_plan")
     if vp:
         _p(f"  verification_plan: {vp}")
+    dt = arb.get("delegation_target")
+    if dt:
+        _p(f"  delegation_target: {dt}")
+    sc = arb.get("stop_condition")
+    if sc:
+        _p(f"  stop_condition: {sc}")
     dissent = arb.get("dissent")
     if dissent:
         _p(f"  dissent: {dissent}")

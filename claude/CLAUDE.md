@@ -134,6 +134,13 @@ progress.md
 - hard limit 120줄. 80줄 넘으면 압축
 - status 필드 필수: active / paused / abandoned / handoff
 - 업데이트 트리거: 방향·범위 변경, 결정 번복, 새 제약, 작업 단위 완료, 주제 전환. 단순 Q&A·중간 디버깅·매 메시지 안 함
+- 고위험·장기·재개 가능성 있는 작업은 Goal 섹션에 선택형 5질문 답을 한 줄씩 명시 (작은 작업은 생략):
+  · 결과(Outcome): 무엇이 만들어지면 끝인가
+  · 입력(Inputs): 무엇이 있어야 시작 가능
+  · 의존(Depends on): 어떤 외부 파일·API·합의에 묶이는가
+  · 검토자(Verifier): self / critic / verifier(ai-debate) / test / healthcheck 중 하나
+  · 완료기준(Done when): 어떤 신호로 끝났다고 본다
+- WIP limit: status=active 인 작업은 동시 3개까지. 4번째 시도 시 기존 active 중 하나를 paused·abandoned·handoff로 정리한 후 추가. drift·방치 방지 (2026-05-12 Hermes 칸반 5질문 참고).
 - 종료 처리:
   - active 끝 → 결정 history 이관 + progress 삭제
   - paused → progress 유지, status 갱신
