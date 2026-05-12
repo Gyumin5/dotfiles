@@ -348,6 +348,10 @@ def main():
     (run_dir / "meta.json").write_text(json.dumps({
         "seed": seed, "started": run_id, "pool": POOL, "roles": ROLES,
         "max_rounds": args.max_rounds, "memory_attached": bool(memory_block),
+        # CLAUDE_CODE_SESSION_ID: claude 2.1.132+ 가 Bash subprocess 에 자동 주입.
+        # 어느 세션이 ai-debate 호출했는지 추적용 (사고 회고 시 cross-session 상관).
+        "parent_session_id": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+        "parent_cwd": str(Path.cwd()),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     all_outputs = []
