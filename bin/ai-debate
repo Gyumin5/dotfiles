@@ -591,6 +591,19 @@ def main():
     _p(f"=== ai-debate run {run_id} ===")
     _p(f"rounds={rounds_done}/{args.max_rounds} consensus={final_consensus}")
     _p(f"roles={selected_roles} ({roles_source}) budget={budget_used_msg}")
+    # 시스템 헤더: 실제 호출된 에이전트 + 성공/실패 카운트 (arbiter narrative와 무관, 사실).
+    agent_stats = {}
+    for o in all_outputs:
+        a = o.get("_agent")
+        if not a or a == "arbiter":
+            continue
+        agent_stats.setdefault(a, [0, 0])
+        if "_error" in o:
+            agent_stats[a][1] += 1
+        else:
+            agent_stats[a][0] += 1
+    participants = " | ".join(f"{a}={ok}ok/{fail}fail" for a, (ok, fail) in sorted(agent_stats.items())) or "-"
+    _p(f"agents: {participants}")
     _p(f"artifacts={run_dir}")
     _p()
 
