@@ -74,17 +74,8 @@ def _track_usage(data):
         if not same:
             with open(path, "a") as f:
                 f.write(json.dumps(rec) + "\n")
-        if prev and isinstance(prev.get("sd_pct"), (int, float)) and isinstance(rec.get("sd_pct"), (int, float)):
-            if prev.get("sd_reset") == rec.get("sd_reset"):
-                drop = prev["sd_pct"] - rec["sd_pct"]
-                if drop >= ANOMALY_DROP_PP:
-                    msg = (
-                        "[usage-tracker] 7d% 이상 감소: {}% -> {}% ({}pp drop, resets_at 동일). "
-                        "5h: {}% -> {}%. 기록 {}.".format(
-                            prev["sd_pct"], rec["sd_pct"], int(drop),
-                            prev.get("fh_pct"), rec.get("fh_pct"), path)
-                    )
-                    _alert_telegram(msg)
+        # usage-tracker 알림 비활성 (2026-05-13, 사용자 요청: 부정확한 알림 과다).
+        # history jsonl 기록은 유지(통계용), 텔레그램 알림만 제거.
     except Exception:
         pass
 
