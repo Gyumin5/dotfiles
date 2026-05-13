@@ -66,12 +66,12 @@ candidate_count=0
 HN_SINCE=$(date -d '7 days ago' +%s)
 hn_resp=$(curl -sS --max-time 25 -G \
     --data-urlencode "tags=story" \
-    --data-urlencode "numericFilters=created_at_i>${HN_SINCE},points>50" \
-    --data-urlencode "hitsPerPage=20" \
+    --data-urlencode "numericFilters=created_at_i>${HN_SINCE},points>100" \
+    --data-urlencode "hitsPerPage=10" \
     "https://hn.algolia.com/api/v1/search" 2>/dev/null || echo "")
 if [ -n "$hn_resp" ]; then
     hn_items=$(echo "$hn_resp" | jq -c \
-        '[ .hits[]? | select(.url != null and (.points // 0) >= 50) | {source:"hackernews", title:.title, url:.url, points:.points, published:.created_at, body:""} ]' 2>/dev/null || echo "[]")
+        '[ .hits[]? | select(.url != null and (.points // 0) >= 100) | {source:"hackernews", title:.title, url:.url, points:.points, published:.created_at, body:""} ]' 2>/dev/null || echo "[]")
     hn_cnt=$(echo "$hn_items" | jq 'length' 2>/dev/null || echo 0)
     if [ "$hn_cnt" -gt 0 ]; then
         echo "$hn_items" | jq -c '.[]' >> "$CANDIDATES_FILE"
@@ -101,7 +101,7 @@ for m in pattern.finditer(html):
         continue
     seen.add(path)
     items.append(path)
-    if len(items) >= 5: break
+    if len(items) >= 3: break
 for p in items:
     print(json.dumps({'source':'github-trending','title':'github-trending: '+p,'url':'https://github.com'+p,'lang':'${lang}' or 'mixed','published':'','body':''}, ensure_ascii=False))
 " 2>/dev/null || echo "")
@@ -118,7 +118,7 @@ log "  github-trending: $gh_added_count repos (lang별 weekly top)"
 arxiv_added_count=0
 for cat in "cs.AI" "cs.LG" "cs.RO"; do
     arxiv_resp=$(curl -sS --max-time 20 \
-        "https://export.arxiv.org/api/query?search_query=cat:${cat}&sortBy=submittedDate&sortOrder=descending&max_results=5" 2>/dev/null || echo "")
+        "https://export.arxiv.org/api/query?search_query=cat:${cat}&sortBy=submittedDate&sortOrder=descending&max_results=3" 2>/dev/null || echo "")
     [ -z "$arxiv_resp" ] && continue
     parsed=$(echo "$arxiv_resp" | python3 -c "
 import sys, re, json
@@ -189,7 +189,17 @@ if [ "${#DEBATE_OUT}" -lt 500 ]; then
 fi
 
 # arbiter FINAL 섹션 추출 (없으면 전체 사용).
-OUTPUT=$(echo "$DEBATE_OUT" | awk '/^--- ARBITER/{flag=1} flag{print}' )
+# 텔레그램 전송용 본문은 arbiter의 final_decision 필드만 사용 (사용자 추천 브리핑).
+# rationale/action_steps/risks/dissent 등은 archive 파일에만 남김.
+ARB_RUN_DIR=$(echo "$DEBATE_OUT" | awk '/^artifacts=/{sub("artifacts=",""); print; exit}')
+OUTPUT=""
+if [ -n "$ARB_RUN_DIR" ] && [ -f "$ARB_RUN_DIR/arbiter.normalized.json" ]; then
+    OUTPUT=$(jq -r '.final_decision // ""' "$ARB_RUN_DIR/arbiter.normalized.json" 2>/dev/null)
+fi
+# fallback: stdout 전체 (구버전 호환)
+if [ -z "$OUTPUT" ]; then
+    OUTPUT=$(echo "$DEBATE_OUT" | awk '/^--- ARBITER/{flag=1} flag{print}')
+fi
 [ -z "$OUTPUT" ] && OUTPUT="$DEBATE_OUT"
 
 # URL 가드: 본문 안에 http 링크 ≥ 3.
