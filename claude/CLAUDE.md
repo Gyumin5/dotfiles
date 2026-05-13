@@ -65,6 +65,7 @@ Bash timeout 600000ms. 응답 없이 진행 금지. 실패 시 해당 PID만 kil
 ## 도구 규칙
 
 - HTML 열기: `google-chrome` (xdg-open 금지)
+- HTML 문서 작성 시 항상 모바일 친화. viewport meta 필수(width=device-width, initial-scale=1), 폰 화면(<=480px) 가독성 우선, max-width로 가로 폭 통제, 폰트 16px+ 본문, 터치 타깃 44px+, 가로 스크롤·고정 픽셀 너비·소형 폰트 금지. 데스크탑 대응은 미디어 쿼리로 추가.
 - 경로 미지정 시 현재 프로젝트 내에서만 검색
 - 텔레그램 채널 응답 IRON LAW (어기면 사용자 무응답 상태 발생):
   · 메시지에 <channel source="plugin:telegram:telegram"> 태그가 있으면 그 메시지에 대한 모든 응답은 mcp__plugin_telegram_telegram__reply 도구 호출 1회 이상 필수.
