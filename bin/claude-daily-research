@@ -53,56 +53,99 @@ abort() {
 log "start run_id=$RUN_ID since=$SEVEN_DAYS_AGO"
 status start true ""
 
-# ── 1. curl 기반 search: GitHub releases (deterministic, no AI auth needed) ──
-REPOS=(
-    "anthropics/claude-code"
-    "anthropics/anthropic-sdk-python"
-    "anthropics/anthropic-sdk-typescript"
-    "anthropics/anthropic-quickstarts"
-    "anthropics/claude-agent-sdk-python"
-    "anthropics/claude-agent-sdk-typescript"
-)
-
+# ── 1. curl 기반 search: 인터넷 유행 기술 일반 (HN + GitHub trending + arXiv) ──
+# 2026-05-14 변경: anthropics/* 추적은 어차피 auto-upgrade라 무의미 (사용자 요청).
+# 대신 인터넷에서 유행하는 기술/논문 전반을 수집.
 CANDIDATES_FILE="$(mktemp)"
 trap "rm -f $CANDIDATES_FILE" EXIT
 
 candidate_count=0
-for repo in "${REPOS[@]}"; do
-    # GitHub releases API. unauth limit 60/h - 6 repos OK.
-    resp=$(curl -sS --max-time 20 \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/${repo}/releases?per_page=10" 2>/dev/null || echo "[]")
-    [ -z "$resp" ] && continue
-    # Filter published_at >= 7d ago
-    items=$(echo "$resp" | jq -c --arg since "$SEVEN_DAYS_AGO" --arg r "$repo" \
-        '[ .[] | select(.published_at >= $since) | {repo:$r, tag:.tag_name, name:.name, url:.html_url, published:.published_at, body:(.body // "" | .[0:400])} ]' 2>/dev/null || echo "[]")
-    cnt=$(echo "$items" | jq 'length' 2>/dev/null || echo 0)
-    if [ "$cnt" -gt 0 ]; then
-        echo "$items" | jq -c '.[]' >> "$CANDIDATES_FILE"
-        candidate_count=$((candidate_count + cnt))
-        log "  $repo: $cnt new releases"
+
+# 1a) HackerNews — Algolia search, 지난 7일 인기 top 20
+# > 가 URL에서 안전하므로 %3E로 인코딩
+HN_SINCE=$(date -d '7 days ago' +%s)
+hn_resp=$(curl -sS --max-time 25 -G \
+    --data-urlencode "tags=story" \
+    --data-urlencode "numericFilters=created_at_i>${HN_SINCE},points>50" \
+    --data-urlencode "hitsPerPage=20" \
+    "https://hn.algolia.com/api/v1/search" 2>/dev/null || echo "")
+if [ -n "$hn_resp" ]; then
+    hn_items=$(echo "$hn_resp" | jq -c \
+        '[ .hits[]? | select(.url != null and (.points // 0) >= 50) | {source:"hackernews", title:.title, url:.url, points:.points, published:.created_at, body:""} ]' 2>/dev/null || echo "[]")
+    hn_cnt=$(echo "$hn_items" | jq 'length' 2>/dev/null || echo 0)
+    if [ "$hn_cnt" -gt 0 ]; then
+        echo "$hn_items" | jq -c '.[]' >> "$CANDIDATES_FILE"
+        candidate_count=$((candidate_count + hn_cnt))
+        log "  hackernews: $hn_cnt items"
+    fi
+fi
+
+# 1b) GitHub trending — weekly top, 언어별. python으로 robust parse (필터 URL 제외).
+gh_added_count=0
+for lang in "" "python" "rust" "typescript"; do
+    url="https://github.com/trending"
+    [ -n "$lang" ] && url="$url/$lang"
+    url="$url?since=weekly"
+    gh_html=$(curl -sS --max-time 20 -A "Mozilla/5.0 (compatible; daily-research/1.0)" "$url" 2>/dev/null || echo "")
+    [ -z "$gh_html" ] && continue
+    parsed=$(echo "$gh_html" | python3 -c "
+import sys, re, json
+html = sys.stdin.read()
+# 구조: <h2 class='h3 lh-condensed'><a href='/owner/repo' ...>
+pattern = re.compile(r'<h2[^>]*class=\"[^\"]*lh-condensed[^\"]*\"[^>]*>\s*<a[^>]+href=\"(/[^/\"]+/[^/\"?]+)\"', re.S)
+seen = set()
+items = []
+for m in pattern.finditer(html):
+    path = m.group(1).strip()
+    if path.startswith('/trending') or path in seen:
+        continue
+    seen.add(path)
+    items.append(path)
+    if len(items) >= 5: break
+for p in items:
+    print(json.dumps({'source':'github-trending','title':'github-trending: '+p,'url':'https://github.com'+p,'lang':'${lang}' or 'mixed','published':'','body':''}, ensure_ascii=False))
+" 2>/dev/null || echo "")
+    if [ -n "$parsed" ]; then
+        echo "$parsed" >> "$CANDIDATES_FILE"
+        n=$(echo "$parsed" | wc -l)
+        gh_added_count=$((gh_added_count + n))
     fi
 done
+candidate_count=$((candidate_count + gh_added_count))
+log "  github-trending: $gh_added_count repos (lang별 weekly top)"
 
-# Anthropic news (HTML scrape, fragile but cheap). 최근 4건만.
-news_html=$(curl -sS --max-time 15 "https://www.anthropic.com/news" 2>/dev/null || echo "")
-if [ -n "$news_html" ]; then
-    # 간단 추출: /news/ 링크 + 텍스트.
-    echo "$news_html" \
-        | grep -oE 'href="/news/[^"]+"[^>]*>[^<]+' \
-        | head -8 \
-        | while read -r line; do
-            href=$(echo "$line" | sed -E 's|href="([^"]+)".*|\1|')
-            title=$(echo "$line" | sed -E 's|.*>||')
-            [ -z "$href" ] || [ -z "$title" ] && continue
-            jq -nc --arg r "anthropic-news" --arg u "https://www.anthropic.com${href}" --arg t "$title" \
-                '{repo:$r, tag:"", name:$t, url:$u, published:"", body:""}'
-        done >> "$CANDIDATES_FILE"
-    extra=$(grep -c '"repo":"anthropic-news"' "$CANDIDATES_FILE" 2>/dev/null | head -1 | tr -dc '0-9')
-    [ -z "$extra" ] && extra=0
-    candidate_count=$((candidate_count + extra))
-    log "  anthropic news: $extra titles"
-fi
+# 1c) arXiv 최신 cs.AI / cs.LG / cs.RO — atom feed, python parse
+arxiv_added_count=0
+for cat in "cs.AI" "cs.LG" "cs.RO"; do
+    arxiv_resp=$(curl -sS --max-time 20 \
+        "https://export.arxiv.org/api/query?search_query=cat:${cat}&sortBy=submittedDate&sortOrder=descending&max_results=5" 2>/dev/null || echo "")
+    [ -z "$arxiv_resp" ] && continue
+    parsed=$(echo "$arxiv_resp" | python3 -c "
+import sys, re, json
+buf = sys.stdin.read()
+entries = re.findall(r'<entry>(.*?)</entry>', buf, re.S)
+for e in entries:
+    tm = re.search(r'<title>(.*?)</title>', e, re.S)
+    im = re.search(r'<id>(.*?)</id>', e, re.S)
+    pm = re.search(r'<published>(.*?)</published>', e, re.S)
+    sm = re.search(r'<summary>(.*?)</summary>', e, re.S)
+    if tm and im:
+        print(json.dumps({
+            'source':'arxiv-${cat}',
+            'title':' '.join(tm.group(1).split()),
+            'url':im.group(1).strip(),
+            'published':(pm.group(1).strip() if pm else ''),
+            'body':' '.join((sm.group(1) if sm else '').split())[:300]
+        }, ensure_ascii=False))
+" 2>/dev/null || echo "")
+    if [ -n "$parsed" ]; then
+        echo "$parsed" >> "$CANDIDATES_FILE"
+        n=$(echo "$parsed" | wc -l)
+        arxiv_added_count=$((arxiv_added_count + n))
+    fi
+done
+candidate_count=$((candidate_count + arxiv_added_count))
+log "  arxiv: $arxiv_added_count papers (cs.AI/LG/RO 최신)"
 
 log "search done: $candidate_count candidates"
 status search true "candidate_count:$candidate_count"
@@ -114,18 +157,18 @@ fi
 # ── 2. ai-debate 평가 호출 ──
 CANDIDATES_JSON=$(cat "$CANDIDATES_FILE")
 
-DEBATE_TASK="아래는 지난 7일 내 anthropics GitHub release 와 anthropic.com/news 에서 자동 수집한 Claude Code 생태계 변화 후보다. 각 후보를 평가해 운영자에게 보낼 한국어 평문 브리핑을 작성하라.
+DEBATE_TASK="아래는 지난 7일 인터넷에서 화제가 된 기술/논문 후보다 — HackerNews 인기 글, GitHub trending repo, arXiv cs.AI/LG/RO 최신 논문에서 자동 수집. 운영자(소속: AV/SLAM 연구, ROS 사용, 9개 Claude Code 세션 운영, dotfiles 관리, 논문 작성)에게 보낼 한국어 평문 브리핑을 작성하라.
 
-평가 기준
-- 도입 / 보류 / 비추 + 이유 1줄.
-- 적용 난이도 (쉬움/중간/어려움).
-- 사용자 환경: Ubuntu, Claude Code 2.1, systemd 9개 세션, 텔레그램 remote-control, lean-ctx·telegram·code-review·scientific-writer 플러그인, ai-collaborate·paper-fit·loop·schedule 스킬, dotfiles 관리, Claude Max + Opus 4.7 (1M).
-- 사고 가드(prompt-length / large-read / secrets-scan / rate-limit / drift / stuck-loop / bash-latency) 와 충돌 가능성 표시.
+평가 관점
+- 트렌드 핵심: 어떤 패러다임/주제가 뜨고 있는지 (예: agentic, retrieval, robotics, 도구체인 등)
+- 사용자 연관성: AV/SLAM·로봇·논문·LLM 워크플로우·자동화 중 어느 축과 닿는지
+- 즉시 시도 / 관심 보류 / 무관 — 1줄 사유
 
-출력 형식 (평문, 한국어, 한 덩어리)
-- 백틱·코드펜스·**굵게** 금지. 들여쓰기·맨앞 공백 금지.
-- 후보 하나당 3~5줄: 제목, URL, 날짜, 핵심 변화, 도입 판정 + 이유, 난이도.
-- 마지막에 '오늘 도입 추천 1건' 또는 '오늘 도입 추천 없음' + 사유.
+출력 형식 (평문 한국어, 한 덩어리, 4500자 이내)
+- 백틱·코드펜스·굵게 금지. 들여쓰기·맨앞 공백 금지.
+- 첫 단락 3~5줄: 이번 주 핵심 트렌드 요약 (어떤 카테고리가 부각, 어떤 키워드가 반복, 사용자 관심사와 어떻게 맞물리는지).
+- 그 다음: 가장 흥미로운 후보 5~8건만 골라 각각 4~6줄 (제목, URL, source, 핵심, 사용자에게 의미, 시도/보류/무관 판정 + 이유). 8건 넘으면 자르고 '나머지 N건은 무관/유사 주제'로 마무리.
+- 마지막에 '이번 주 1건 깊게 볼 만한 것' + 이유 1줄.
 
 후보 (JSON lines):
 ${CANDIDATES_JSON}"
@@ -145,7 +188,8 @@ OUTPUT=$(echo "$DEBATE_OUT" | awk '/^--- ARBITER/{flag=1} flag{print}' )
 # URL 가드: 본문 안에 http 링크 ≥ 3.
 url_count=$(echo "$OUTPUT" | grep -oE 'https?://[^ )"]+' | sort -u | wc -l)
 log "url_count=$url_count"
-if [ "$url_count" -lt 3 ]; then
+# 트렌드 브리핑은 narrative 위주라 URL 적을 수 있음. 최소 1.
+if [ "$url_count" -lt 1 ]; then
     abort guard "url_count_${url_count}"
 fi
 
