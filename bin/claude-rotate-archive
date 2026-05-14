@@ -54,6 +54,18 @@ done
 find "$LOGS" -name "*.log.1.gz" -mtime +90 -delete 2>/dev/null
 find "$PROJECTS" -name "*.jsonl.gz" -mtime +90 -delete 2>/dev/null
 
+# 3.5) ai-debate run dirs 14일+ 삭제. 7500+개 디렉토리 / 126MB 누적이 가장 빠른
+# 디스크 압박 원인 (하루 ~400개 생성). 14일 retention 으로 운영 회고 가능.
+DEBATE_DIR=~/.claude/state/ai-debate
+if [ -d "$DEBATE_DIR" ]; then
+    DEBATE_OLD_DAYS=14
+    old_count=$(find "$DEBATE_DIR" -maxdepth 1 -type d -name 'run-*' -mtime +${DEBATE_OLD_DAYS} 2>/dev/null | wc -l)
+    if [ "$old_count" -gt 0 ]; then
+        find "$DEBATE_DIR" -maxdepth 1 -type d -name 'run-*' -mtime +${DEBATE_OLD_DAYS} -exec rm -rf {} + 2>/dev/null
+        log "ai-debate runs deleted: $old_count dirs (>${DEBATE_OLD_DAYS}d)"
+    fi
+fi
+
 # 4) 본 스크립트 로그도 너무 커지면 truncate
 own_sz=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
 [ "$own_sz" -gt $((5 * 1024 * 1024)) ] && tail -c 1M "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
