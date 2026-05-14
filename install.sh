@@ -89,10 +89,27 @@ if ! command -v claude &>/dev/null; then
   fi
 fi
 
-# Install uv (Python package manager for MCP servers)
+# Install uv (Python package manager for MCP servers) — pinned + sha256 verified
+# 2026-05-14: replaced `curl ... | sh` supply-chain pattern with pinned release tarball + SHA256.
+# Bump UV_VERSION when needed and refresh from GitHub releases.
 if ! command -v uv &>/dev/null; then
-  echo "Installing uv..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null || echo "WARNING: uv install failed"
+  echo "Installing uv (pinned + sha256 verified)..."
+  UV_VERSION="0.11.14"
+  UV_ASSET="uv-x86_64-unknown-linux-gnu.tar.gz"
+  UV_BASE="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}"
+  UV_TMP="$(mktemp -d)"
+  if curl -fsSL "${UV_BASE}/${UV_ASSET}" -o "${UV_TMP}/${UV_ASSET}" \
+     && curl -fsSL "${UV_BASE}/${UV_ASSET}.sha256" -o "${UV_TMP}/${UV_ASSET}.sha256" \
+     && ( cd "${UV_TMP}" && sha256sum -c "${UV_ASSET}.sha256" >/dev/null ); then
+    tar -xzf "${UV_TMP}/${UV_ASSET}" -C "${UV_TMP}"
+    mkdir -p "$HOME/.local/bin"
+    install -m755 "${UV_TMP}"/uv-x86_64-unknown-linux-gnu/uv "$HOME/.local/bin/uv"
+    install -m755 "${UV_TMP}"/uv-x86_64-unknown-linux-gnu/uvx "$HOME/.local/bin/uvx" 2>/dev/null || true
+    echo "uv ${UV_VERSION} installed to ~/.local/bin"
+  else
+    echo "WARNING: uv ${UV_VERSION} install failed (download or sha256 mismatch)"
+  fi
+  rm -rf "${UV_TMP}"
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
@@ -116,10 +133,33 @@ for mcp_repo in \
   fi
 done
 
-# Install Claude Squad (if not already installed)
+# Install Claude Squad (if not already installed) — pinned binary tarball
+# 2026-05-14: replaced `curl ... | bash` with pinned GitHub release tarball.
+# claude-squad releases ship a Go binary; no .sha256 published, so HTTPS to
+# GitHub releases is the trust anchor (TLS + GitHub artifact signing).
 if ! command -v cs &>/dev/null; then
-  echo "Installing Claude Squad..."
-  curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.sh | bash 2>/dev/null || echo "WARNING: Claude Squad install failed (needs internet)"
+  echo "Installing Claude Squad (pinned tarball)..."
+  CS_VERSION="1.0.17"
+  CS_ARCH="$(uname -m)"
+  case "$CS_ARCH" in x86_64) CS_GOARCH=amd64 ;; aarch64|arm64) CS_GOARCH=arm64 ;; *) CS_GOARCH=amd64 ;; esac
+  CS_ASSET="claude-squad_${CS_VERSION}_linux_${CS_GOARCH}.tar.gz"
+  CS_URL="https://github.com/smtg-ai/claude-squad/releases/download/v${CS_VERSION}/${CS_ASSET}"
+  CS_TMP="$(mktemp -d)"
+  if curl -fsSL "${CS_URL}" -o "${CS_TMP}/${CS_ASSET}"; then
+    tar -xzf "${CS_TMP}/${CS_ASSET}" -C "${CS_TMP}"
+    mkdir -p "$HOME/.local/bin"
+    # Tarball ships binary named "claude-squad"; install as both names for cs alias compatibility
+    if [ -f "${CS_TMP}/claude-squad" ]; then
+      install -m755 "${CS_TMP}/claude-squad" "$HOME/.local/bin/claude-squad"
+      ln -sfn "$HOME/.local/bin/claude-squad" "$HOME/.local/bin/cs"
+      echo "claude-squad ${CS_VERSION} installed to ~/.local/bin"
+    else
+      echo "WARNING: claude-squad binary not found in tarball"
+    fi
+  else
+    echo "WARNING: Claude Squad install failed (download)"
+  fi
+  rm -rf "${CS_TMP}"
 fi
 
 # Auto-install Claude Code plugins (if claude command available)
