@@ -1,0 +1,30 @@
+#!/bin/bash
+# claude-bun-ensure: 모든 claude-*.service 가 telegram MCP (bun) 자식을 갖고 있는지 확인.
+# 없으면 해당 세션 systemctl restart. 부팅 직후 race condition 자동 복구용.
+# control-bot 은 bun 안 씀 → 제외.
+#
+# 호출: oneshot service 가 boot 후 90초 시점에 실행.
+
+set -uo pipefail
+LOG="$HOME/.claude/logs/bun-ensure.log"
+mkdir -p "$(dirname "$LOG")"
+ts() { date -Iseconds; }
+log() { echo "[$(ts)] $1" >> "$LOG"; }
+
+restarted=0
+for svc in $(systemctl --user list-units 'claude-*.service' --no-pager --no-legend 2>/dev/null | awk '{print $1}'); do
+    case "$svc" in
+        claude-control-bot.service) continue ;;
+        claude-watchdog.service|claude-*-healthcheck.service|claude-*-recovery.service|claude-progress-updater*.service|claude-rotate*.service|claude-usage-*.service|claude-weekly-*.service|claude-memory-*.service|claude-bun-ensure.service|claude-daily-research.service)
+            continue ;;
+    esac
+    has_bun=$(systemd-cgls --user-unit "$svc" --no-pager 2>/dev/null | grep -c bun || true)
+    if [ "$has_bun" -eq 0 ]; then
+        log "restart $svc (bun child missing)"
+        systemctl --user restart "$svc" && restarted=$((restarted + 1))
+        sleep 2
+    fi
+done
+
+[ "$restarted" -gt 0 ] && log "done: $restarted sessions restarted"
+exit 0

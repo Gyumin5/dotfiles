@@ -1,0 +1,12 @@
+[Unit]
+Description=부팅 90초 후 bun 누락 세션 자동 복구
+After=default.target
+
+[Timer]
+# 부팅 후 90초 시점에 한 번 실행. 그 후 무한 (재실행 없음).
+OnBootSec=90s
+Unit=claude-bun-ensure.service
+RemainAfterElapse=false
+
+[Install]
+WantedBy=timers.target

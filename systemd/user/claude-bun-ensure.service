@@ -1,0 +1,13 @@
+[Unit]
+Description=Claude Code 부팅 후 bun (telegram MCP) 누락 세션 자동 복구
+After=network-online.target default.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/gmoh/.local/bin/claude-bun-ensure
+StandardOutput=append:/home/gmoh/.claude/logs/bun-ensure.log
+StandardError=append:/home/gmoh/.claude/logs/bun-ensure.log
+
+[Install]
+WantedBy=default.target
