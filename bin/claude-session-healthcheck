@@ -318,6 +318,9 @@ def main():
             ):
                 stuck_loop = True
 
+        # 2026-05-18: stuck-loop 알림 비활성화 (운영자 요청). 일반 무응답 알림도 노이즈 큼.
+        # 필요 시 jsonl 직접 조사. 본 healthcheck 는 continue 만 하고 아무 알림 안 보냄.
+        continue
         if not stuck_loop:
             if idle < THRESHOLD_NO_ACTIVITY_SEC:
                 continue

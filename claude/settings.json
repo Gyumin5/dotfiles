@@ -1,7 +1,5 @@
 {
   "respectGitignore": true,
-  "awaySummaryEnabled": true,
-  "autoCompactWindow": 500000,
   "env": {
     "ENABLE_PROMPT_CACHING_1H": "1"
   },
@@ -259,5 +257,8 @@
       }
     }
   },
-  "effortLevel": "medium"
+  "effortLevel": "medium",
+  "autoCompactWindow": 500000,
+  "awaySummaryEnabled": true,
+  "theme": "dark"
 }

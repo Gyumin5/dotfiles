@@ -30,6 +30,11 @@ StandardOutput=append:/home/gmoh/.claude/logs/claude-$(basename "$PROJECT_PATH" 
 StandardError=append:/home/gmoh/.claude/logs/claude-$(basename "$PROJECT_PATH" | tr '_' '-').log
 KillMode=mixed
 TimeoutStopSec=20
+# 안정성 가드 (2026-05-17): bun 메모리 누수/zombie가 다른 세션 OOM 유발하지 않도록 cgroup 격리.
+# 평균 RSS ~215M 기준 MemoryHigh 1G 마진 5x (soft, swap 압박만), MemoryMax 2G 마진 10x (hard kill).
+MemoryHigh=1G
+MemoryMax=2G
+TasksMax=512
 
 [Install]
 WantedBy=default.target
