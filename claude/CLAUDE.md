@@ -16,6 +16,10 @@
 
 progress.md 는 반드시 현재 systemd unit 의 WorkingDirectory 절대경로(또는 사용자가 명시한 cwd)에만 쓴다. ~ 에 새 폴더 만들지 마. ~/.claude/projects/-home-gmoh-... 같은 키 이름을 폴더명으로 mkdir 금지. 경로 의심되면 pwd 로 확인 먼저. (2026-05-15 av-ros-test-* 찌꺼기 4개 발생 후 추가.)
 
+## 시각 표기 (KST)
+
+progress.md / history.md 의 updated/timestamp 필드는 반드시 시스템 KST 시각으로 쓴다. UTC 사용 금지. 시각 가져올 때 `date '+%Y-%m-%d %H:%M KST'` 또는 Python `datetime.now()` (시스템 timezone Asia/Seoul) 사용. `date -u` 나 `datetime.utcnow()` 결과를 KST 라벨로 쓰면 9시간 어긋남. (2026-05-21 velocity 세션 02:13 KST 라벨 사고 후 추가.)
+
 ## AI 협업 (최우선)
 
 외부 AI(gemini/codex)를 부르는 모든 키워드는 ai-collaborate 단일 진입점으로 라우팅.
