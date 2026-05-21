@@ -56,6 +56,12 @@ CWD_FILE="$QUEUE_DIR/${PROJ}.cwd"
 # 프로젝트별 telegram bot로 라우팅. recovery script가 큐 비어도 cwd 알 수 있게 매번 갱신.
 echo "$CWD" > "$CWD_FILE" 2>/dev/null
 PROJECT_TELEGRAM_ENV="${CWD}/.claude/telegram/.env"
+if [ ! -f "$PROJECT_TELEGRAM_ENV" ] && [ -n "$PROJ" ]; then
+    SD_WD=$(systemctl --user show "claude-${PROJ}.service" -p WorkingDirectory 2>/dev/null | sed 's/^WorkingDirectory=//')
+    if [ -n "$SD_WD" ] && [ -f "$SD_WD/.claude/telegram/.env" ]; then
+        PROJECT_TELEGRAM_ENV="$SD_WD/.claude/telegram/.env"
+    fi
+fi
 if [ -f "$PROJECT_TELEGRAM_ENV" ]; then
     TELEGRAM_ENV="$PROJECT_TELEGRAM_ENV"
 else

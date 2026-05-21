@@ -45,6 +45,13 @@ fi
 [ -z "$PROJ" ] && PROJ=$(basename "$CWD")
 ALERT_FLAG="${ALERT_FLAG_PREFIX}-${PROJ}.flag"
 PROJECT_TELEGRAM_ENV="${CWD}/.claude/telegram/.env"
+if [ ! -f "$PROJECT_TELEGRAM_ENV" ] && [ -n "$PROJ" ]; then
+    # CWD가 빈/잘못된 경로일 수 있어 systemd WorkingDirectory로 재시도
+    SD_WD=$(systemctl --user show "claude-${PROJ}.service" -p WorkingDirectory 2>/dev/null | sed 's/^WorkingDirectory=//')
+    if [ -n "$SD_WD" ] && [ -f "$SD_WD/.claude/telegram/.env" ]; then
+        PROJECT_TELEGRAM_ENV="$SD_WD/.claude/telegram/.env"
+    fi
+fi
 if [ -f "$PROJECT_TELEGRAM_ENV" ]; then
     TELEGRAM_ENV="$PROJECT_TELEGRAM_ENV"
 else
