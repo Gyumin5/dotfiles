@@ -234,7 +234,9 @@ def call_agent(agent, role, prompt, run_dir, label):
     started = time.time()
     try:
         if agent == "gemini":
-            cmd = ["gemini-ask", "--new", "위 지시대로 JSON만 출력"]
+            # 2026-05-21: gemini-cli (EOL 2026-06-18) → antigravity CLI (agy) 교체.
+            # agy -p "..." + stdin=prompt 패턴. --print-timeout 으로 hang 회피.
+            cmd = ["/home/gmoh/.local/bin/agy", "-p", "위 지시대로 JSON만 출력", "--print-timeout", "5m"]
             env = os.environ.copy()
             env["AI_OUT_RAW"] = "1"
         elif agent == "codex":
