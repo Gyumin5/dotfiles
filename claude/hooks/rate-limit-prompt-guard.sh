@@ -19,7 +19,7 @@ CACHE=~/.claude/statusline_cache.json
 QUEUE_DIR=~/.claude/state/rate-limit-queue
 ALERT_FLAG_PREFIX=~/.claude/state/rate-limit-prompt-alert
 COOLDOWN_SEC=300
-FALLBACK_TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
+FALLBACK_TELEGRAM_ENV=~/dotfiles/.claude/telegram/.env
 
 mkdir -p "$QUEUE_DIR"
 

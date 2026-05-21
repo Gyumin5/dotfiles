@@ -383,7 +383,7 @@ def main():
     if args.cwd == "all":
         # cs-managed projects from progress-updater-all 와 동일 매핑
         mapping = {
-            "test_claude": "/home/gmoh/test_claude",
+            "dotfiles": "/home/gmoh/dotfiles",
             "251229": "/home/gmoh/mon/251229",
             "bias": "/home/gmoh/av-ros/test/bias",
             "helipr": "/home/gmoh/av-ros/test/helipr",

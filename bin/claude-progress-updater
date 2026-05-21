@@ -4,7 +4,7 @@
 #
 # 사용:
 #   claude-progress-updater <project-cwd>
-#   예: claude-progress-updater /home/gmoh/test_claude
+#   예: claude-progress-updater /home/gmoh/dotfiles
 #
 # 동작:
 #   1. cwd → claude project key (/와 _ 를 -로) → transcript jsonl 위치 결정

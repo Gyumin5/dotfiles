@@ -219,8 +219,8 @@ Commands:
 
 Examples:
   claude-sessions list
-  claude-sessions restart test-claude
-  claude-sessions rotate test-claude
+  claude-sessions restart dotfiles
+  claude-sessions rotate dotfiles
   claude-sessions restart-all
 HELP
         ;;

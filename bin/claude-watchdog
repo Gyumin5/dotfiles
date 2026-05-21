@@ -18,8 +18,8 @@ log() {
 
 telegram_alert() {
     local text="$1"
-    # test_claude 봇으로 운영자에게 알림
-    local env="/home/gmoh/test_claude/.claude/telegram/.env"
+    # dotfiles 봇으로 운영자에게 알림
+    local env="/home/gmoh/dotfiles/.claude/telegram/.env"
     [ ! -f "$env" ] && return 0
     # shellcheck disable=SC1090
     . "$env"

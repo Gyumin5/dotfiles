@@ -1,5 +1,5 @@
 #!/bin/bash
-# inject-briefing: UserPromptSubmit 훅. test_claude 세션에서만 동작.
+# inject-briefing: UserPromptSubmit 훅. dotfiles 세션에서만 동작.
 # ~/.claude/state/briefings/YYYY-MM-DD.md 가 unread 상태면 (read 마크보다 새로움) 1회 주입 후 read 마크 갱신.
 
 set -uo pipefail
@@ -11,8 +11,8 @@ INPUT=$(cat 2>/dev/null || echo '{}')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 [ -z "$CWD" ] && CWD="$PWD"
 
-# test_claude에서만 동작
-[ "$CWD" = "/home/gmoh/test_claude" ] || exit 0
+# dotfiles에서만 동작
+[ "$CWD" = "/home/gmoh/dotfiles" ] || exit 0
 
 BRIEFING_DIR="$HOME/.claude/state/briefings"
 READ_MARK="$HOME/.claude/state/briefings-read.flag"

@@ -1,5 +1,5 @@
 [Unit]
-Description=Claude Progress Updater (test_claude)
+Description=Claude Progress Updater (all cs-managed projects)
 
 [Service]
 Type=oneshot

@@ -5,7 +5,7 @@ DIRS=(
   "$HOME/av-ros/test/helipr"
   "$HOME/av-ros/test/bias"
   "$HOME/mon/251229"
-  "$HOME/test_claude"
+  "$HOME/dotfiles"
   "$HOME/albert"
   "$HOME/resume"
 )

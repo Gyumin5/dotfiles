@@ -22,7 +22,7 @@ THRESHOLD_7D=99
 CACHE=~/.claude/statusline_cache.json
 ALERT_FLAG_PREFIX=~/.claude/state/rate-limit-alerted
 COOLDOWN_SEC=$((30 * 60))
-FALLBACK_TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
+FALLBACK_TELEGRAM_ENV=~/dotfiles/.claude/telegram/.env
 
 # 1. event JSON 읽기 (tool_name + cwd 추출). 못 읽으면 안전하게 통과.
 EVENT=$(cat 2>/dev/null || echo '{}')

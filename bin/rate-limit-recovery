@@ -15,7 +15,7 @@ THRESHOLD_7D=99
 CACHE=~/.claude/statusline_cache.json
 QUEUE_DIR=~/.claude/state/rate-limit-queue
 STATE_FLAG=~/.claude/state/rate-limit-blocked.flag
-FALLBACK_TELEGRAM_ENV=~/test_claude/.claude/telegram/.env
+FALLBACK_TELEGRAM_ENV=~/dotfiles/.claude/telegram/.env
 
 [ -f "$CACHE" ] || exit 0
 

@@ -87,7 +87,7 @@ if [ "$TOTAL_TOK" -ge "$BLOCK_TOKENS" ]; then
     if [ -f "$PROJECT_TELEGRAM_ENV" ]; then
         TELEGRAM_ENV="$PROJECT_TELEGRAM_ENV"
     else
-        TELEGRAM_ENV="$HOME/test_claude/.claude/telegram/.env"
+        TELEGRAM_ENV="$HOME/dotfiles/.claude/telegram/.env"
     fi
     if [ -f "$TELEGRAM_ENV" ]; then
         . "$TELEGRAM_ENV" 2>/dev/null || true

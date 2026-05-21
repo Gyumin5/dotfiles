@@ -8,7 +8,7 @@ set -uo pipefail
 # 새 프로젝트 추가 시 이 함수에만 한 줄 더하면 끝.
 project_cwd() {
     case "$1" in
-        test-claude)    echo "/home/gmoh/test_claude" ;;
+        dotfiles)       echo "/home/gmoh/dotfiles" ;;
         251229)         echo "/home/gmoh/mon/251229" ;;
         bias)           echo "/home/gmoh/av-ros/test/bias" ;;
         helipr)         echo "/home/gmoh/av-ros/test/helipr" ;;

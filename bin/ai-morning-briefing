@@ -18,7 +18,7 @@ set -u
 export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
 
 # === 설정 ===
-TELEGRAM_ENV="/home/gmoh/test_claude/.claude/telegram/.env"
+TELEGRAM_ENV="/home/gmoh/dotfiles/.claude/telegram/.env"
 CHAT_ID="8689118207"
 DATA_DIR="/home/gmoh/.local/share/ai-briefing"
 TODAY=$(date +%Y-%m-%d)
