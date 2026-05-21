@@ -1,0 +1,11 @@
+[Unit]
+Description=2026-05-28 11:30 KST 1회 발화 (CronCreate 누락 시 fallback)
+
+[Timer]
+OnCalendar=2026-05-28 11:30:00 Asia/Seoul
+Persistent=true
+RemainAfterElapse=false
+Unit=claude-weekly-stability-check.service
+
+[Install]
+WantedBy=timers.target

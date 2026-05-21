@@ -1,0 +1,10 @@
+[Unit]
+Description=Claude weekly stability check (2026-05-21 가드 변경 1주 관찰)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/gmoh/.local/bin/claude-weekly-stability-check systemd-timer
+
+[Install]
+WantedBy=default.target
