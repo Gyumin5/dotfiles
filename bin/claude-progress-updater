@@ -146,6 +146,12 @@ $delta_summary
 3. 형식 유지: # 진행 상황 (YYYY-MM-DD), ## 완성된 시스템 개요, ## 현재 상태, ## 다음 작업 등
 4. 출력은 갱신된 progress.md 전문 ONLY. 마크다운 코드펜스(\`\`\`) 금지. 서론/메타 멘트 금지.
 5. 길이 제한: 80줄 이하. 새 내용 추가 시 오래된 정보 삭제·압축. 토큰 절약 우선.
+
+CRITICAL 출력 규약 (위반 시 자동 거부됨):
+- 첫 문자는 반드시 '#' (markdown 헤더). 예: '# progress.md' 또는 '# 진행 상황 (YYYY-MM-DD)'.
+- 한 줄 요약 sentence ("갱신 완료", "변경 사항 반영" 등) 금지. 반드시 전문 markdown 문서.
+- 기존 progress.md 길이의 30% 이상은 유지 (기존 ${#existing_prog} bytes → 최소 $((${#existing_prog} * 30 / 100)) bytes).
+- 다른 프로젝트 (helipr/bias/intensitylio/velocity 등) 내용 포함 금지. 현재 cwd = $CWD 의 작업만.
 EOF
 )
 
@@ -155,10 +161,30 @@ log "calling claude -p (diff=$diff_size bytes, prog=${#existing_prog} bytes)"
 # - rate-limit-prompt-guard: 자동 작업이므로 큐잉 대상 아님.
 NEW_PROG=$(CLAUDE_AUTOMATED=1 timeout 90 claude -p "$PROMPT" 2>> "$LOG_FILE")
 
-if [ -z "$NEW_PROG" ] || [ "${#NEW_PROG}" -lt 50 ]; then
-    log "claude returned empty/short response (<50 chars), skip"
+if [ -z "$NEW_PROG" ] || [ "${#NEW_PROG}" -lt 300 ]; then
+    log "claude returned empty/short response (<300 chars), skip"
     exit 0
 fi
+
+# size-ratio guard: 새 출력이 기존 progress.md 의 30% 미만이면 거부.
+# 요약 sentence ("progress.md 갱신 완료. ...") 같은 무용한 응답 차단.
+if [ "${#existing_prog}" -gt 500 ]; then
+    min_required=$(( ${#existing_prog} * 30 / 100 ))
+    if [ "${#NEW_PROG}" -lt "$min_required" ]; then
+        log "NEW_PROG too small (${#NEW_PROG} < ${min_required}=existing*0.3), skip — likely summary sentence"
+        exit 0
+    fi
+fi
+
+# 출력은 반드시 '# ' (markdown 헤더) 로 시작해야 progress.md 전문으로 인정.
+NEW_PROG_HEAD=$(printf '%s' "$NEW_PROG" | head -c 200 | tr -d '\r')
+case "$NEW_PROG_HEAD" in
+    \#*) ;;
+    *)
+        log "NEW_PROG does not start with '#' header, skip — likely meta sentence"
+        exit 0
+        ;;
+esac
 
 # 출력 길이 상한 (8KB / ~120줄). 초과하면 80줄로 잘라 토큰·디스크 절약.
 if [ "${#NEW_PROG}" -gt 8000 ]; then
@@ -218,16 +244,9 @@ case "$DRIFT" in
                 echo "$NEW_PROG"
             } > "$PROPOSED.tmp" && mv "$PROPOSED.tmp" "$PROPOSED"
             echo "$cur_lines" > "$STATE_FILE"
-            # 컨트롤봇 알림 (~/.claude/control-bot/.env)
-            if [ -f "$HOME/.claude/control-bot/.env" ]; then
-                . "$HOME/.claude/control-bot/.env" 2>/dev/null || true
-                if [ -n "${CONTROL_BOT_TOKEN:-}" ]; then
-                    curl -s --max-time 5 \
-                        -d "chat_id=8689118207" \
-                        --data-urlencode "text=[progress-updater] $(basename "$CWD"): TOPIC DRIFT detected (sim=$DRIFT). 기존 progress.md 보존, proposed-progress.md 로 기록. 수동 검토 필요." \
-                        "https://api.telegram.org/bot${CONTROL_BOT_TOKEN}/sendMessage" >/dev/null 2>&1 || true
-                fi
-            fi
+            # 2026-05-21: drift 텔레그램 alert 비활성화. proposed-progress.md 로 조용히 기록.
+            # 본 progress.md 는 안전하게 보존되며, 사용자가 필요할 때 proposed-progress.md 직접 확인 가능.
+            # 노이즈 발생 사고: 2026-05-21 12:44 intensitylio + 12:45 test_claude 연속 alert.
             exit 0
         fi
         ;;
