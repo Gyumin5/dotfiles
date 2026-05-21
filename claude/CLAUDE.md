@@ -20,6 +20,20 @@ progress.md 는 반드시 현재 systemd unit 의 WorkingDirectory 절대경로(
 
 progress.md / history.md 의 updated/timestamp 필드는 반드시 시스템 KST 시각으로 쓴다. UTC 사용 금지. 시각 가져올 때 `date '+%Y-%m-%d %H:%M KST'` 또는 Python `datetime.now()` (시스템 timezone Asia/Seoul) 사용. `date -u` 나 `datetime.utcnow()` 결과를 KST 라벨로 쓰면 9시간 어긋남. (2026-05-21 velocity 세션 02:13 KST 라벨 사고 후 추가.)
 
+## commit 시 [DECISION] 마커
+
+git commit 만들 때 결정 가치 있는 변경이면 commit message 첫 줄에 `[DECISION]` 접두 또는 본문에 `근거:` 줄 포함. PostToolUse git-commit-post 훅이 자동으로:
+- progress.md 강제 갱신 (15분 timer 와 별개로 즉시).
+- [DECISION] 마커 있으면 history.md 에 ADR 라인 append (`## [날짜] #NN 제목` + 결정/근거/hash).
+
+마커 적용 기준:
+- 가드/임계/정책 변경 (precompact 7d, KST 룰 등)
+- 새 시스템 도입/제거 (cgroup, 훅, 봇 버튼)
+- 워크플로우/UX 변경
+- 사고 대응 결정
+
+일반 작업 (버그 fix, 리팩토링, 오타, 문서) 은 마커 안 넣음 → progress.md 만 갱신, history.md 깨끗 유지. (2026-05-21 도입.)
+
 ## AI 협업 (최우선)
 
 외부 AI(gemini/codex)를 부르는 모든 키워드는 ai-collaborate 단일 진입점으로 라우팅.

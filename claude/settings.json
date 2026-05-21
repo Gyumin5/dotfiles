@@ -175,6 +175,15 @@
             "command": "/home/gmoh/.claude/hooks/progress-delta.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/git-commit-post.sh"
+          }
+        ]
       }
     ],
     "PreCompact": [
