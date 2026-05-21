@@ -1,25 +1,29 @@
 #!/bin/bash
-# gemini-ask: Gemini CLI wrapper with topic-based session management
+# gemini-ask: Antigravity CLI (agy) wrapper — 라벨은 gemini 유지, 백엔드는 agy.
+#
+# 2026-05-21 마이그레이션: gemini-cli (EOL 2026-06-18) → antigravity CLI.
+# 외부 호출자 4개 (ai-morning-briefing, ai-briefing-review, ai-weekly-review,
+# kill-ai-zombies) 의 API 호환을 위해 wrapper 보존.
 #
 # Usage:
-#   gemini-ask "프롬프트"                       - 자동으로 latest 세션 resume
-#   gemini-ask --topic "코드리뷰" "프롬프트"    - 주제별 세션 찾아서 resume
-#   gemini-ask --new "프롬프트"                 - 새 세션 시작
-#   gemini-ask --session <id> "프롬프트"        - 특정 세션 resume
-#   gemini-ask --list                           - 세션 목록
-#   echo "code" | gemini-ask "리뷰해줘"         - stdin pipe 지원
+#   gemini-ask "프롬프트"                       - 새 호출 (이전엔 latest resume)
+#   gemini-ask --new "프롬프트"                 - 새 호출 (default 와 동일)
+#   gemini-ask --session <id> "프롬프트"        - agy --conversation <id>
+#   gemini-ask --topic "주제" "프롬프트"        - 토픽 매칭 미지원 → 새 호출
+#   gemini-ask --list                           - agy 미지원 → 빈 출력
+#   echo "..." | gemini-ask "..."               - stdin pipe 지원
 
 set -uo pipefail
+
+AGY=/home/gmoh/.local/bin/agy
 
 _AI_TELEM_START=$(date +%s%3N)
 _AI_TELEM_KIND=""
 _ai_telem_finalize() {
     local ec=$?
     local dur=$(( $(date +%s%3N) - _AI_TELEM_START ))
-    local mode="resume"
-    [ "$FORCE_NEW" = true ] && mode="new"
+    local mode="new"
     [ -n "$SESSION_ID" ] && mode="session"
-    [ -n "$TOPIC" ] && mode="topic"
     case $ec in
         2) _AI_TELEM_KIND="rate_limit_429" ;;
         3) _AI_TELEM_KIND="auth_401" ;;
@@ -34,7 +38,6 @@ FORCE_NEW=false
 TOPIC=""
 SESSION_ID=""
 
-# Parse flags
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --new)
@@ -50,7 +53,8 @@ while [[ "${1:-}" == --* ]]; do
             shift 2
             ;;
         --list)
-            gemini --list-sessions 2>/dev/null
+            # agy has no session list. Print informational note + exit clean.
+            echo "[gemini-ask] --list: agy 미지원. (gemini-cli EOL 후 세션 기능 비활성)" >&2
             exit 0
             ;;
         *)
@@ -66,89 +70,31 @@ if [ -z "$PROMPT" ]; then
     exit 1
 fi
 
-# Determine which session to resume
-RESUME_ARG=""
-
-if [ "$FORCE_NEW" = true ]; then
-    RESUME_ARG=""
-elif [ -n "$SESSION_ID" ]; then
-    RESUME_ARG="--resume $SESSION_ID"
-elif [ -n "$TOPIC" ]; then
-    # Parse `gemini --list-sessions` to find topic-matching session
-    SESSION_LIST=$(gemini --list-sessions 2>&1 || true)
-
-    MATCHED_ID=$(echo "$SESSION_LIST" | python3 -c "
-import sys, re
-
-topic = '''$TOPIC'''.strip().lower()
-if not topic:
-    sys.exit(0)
-
-best_id = ''
-# Parse lines like: '  2. 코드 리뷰 요청 (7 minutes ago) [uuid]'
-for line in sys.stdin:
-    m = re.match(r'\s*\d+\.\s+(.+?)\s+\(.*?\)\s+\[([0-9a-f-]+)\]', line.strip())
-    if m:
-        summary = m.group(1).strip().lower()
-        uuid = m.group(2)
-        # Skip empty/placeholder summaries
-        if not summary or summary.replace(',','').replace('.','').strip() == '':
-            continue
-        # Check if topic keywords appear in summary or vice versa
-        if topic in summary or summary in topic:
-            best_id = uuid
-        else:
-            # Fuzzy: check if any word from topic appears in summary
-            topic_words = [w for w in topic.split() if len(w) > 1]
-            if topic_words and any(w in summary for w in topic_words):
-                best_id = uuid
-
-print(best_id)
-" 2>&1)
-
-    if [ -n "$MATCHED_ID" ]; then
-        RESUME_ARG="--resume $MATCHED_ID"
-    else
-        # No matching topic found — start new session
-        RESUME_ARG=""
-    fi
-else
-    # Default: resume latest if exists
-    SESSION_LIST=$(gemini --list-sessions 2>&1 || true)
-    if echo "$SESSION_LIST" | grep -q "Available sessions"; then
-        RESUME_ARG="--resume latest"
-    fi
+# agy resume flag
+RESUME_ARG=()
+if [ -n "$SESSION_ID" ]; then
+    RESUME_ARG=(--conversation "$SESSION_ID")
 fi
 
-# Execute
 run_gemini() {
     local output exit_code
-    if [ -n "$RESUME_ARG" ]; then
-        if [ -t 0 ]; then
-            output=$(timeout --kill-after=10s 600 gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
-        else
-            output=$(cat | timeout --kill-after=10s 600 gemini $RESUME_ARG -p "$PROMPT" -o text 2>&1)
-        fi
+    if [ -t 0 ]; then
+        output=$(timeout --kill-after=10s 600 "$AGY" "${RESUME_ARG[@]}" -p "$PROMPT" --print-timeout 5m 2>&1)
     else
-        if [ -t 0 ]; then
-            output=$(timeout --kill-after=10s 600 gemini -p "$PROMPT" -o text 2>&1)
-        else
-            output=$(cat | timeout --kill-after=10s 600 gemini -p "$PROMPT" -o text 2>&1)
-        fi
+        output=$(cat | timeout --kill-after=10s 600 "$AGY" "${RESUME_ARG[@]}" -p "$PROMPT" --print-timeout 5m 2>&1)
     fi
     exit_code=$?
 
-    # 에러 감지 및 분류
-    if echo "$output" | grep -q "MODEL_CAPACITY_EXHAUSTED\|429"; then
-        echo "[gemini-ask] 서버 용량 부족 (429). Gemini 응답 실패." >&2
+    if echo "$output" | grep -qE 'MODEL_CAPACITY_EXHAUSTED|429|RESOURCE_EXHAUSTED'; then
+        echo "[gemini-ask] 서버 용량 부족 (429)." >&2
         echo "$output"
         return 2
-    elif echo "$output" | grep -q "401\|UNAUTHENTICATED"; then
-        echo "[gemini-ask] 인증 만료 (401). gcloud auth login 필요." >&2
+    elif echo "$output" | grep -qE '401|UNAUTHENTICATED|invalid_grant'; then
+        echo "[gemini-ask] 인증 만료 (401). agy 재로그인 필요." >&2
         echo "$output"
         return 3
-    elif echo "$output" | grep -q "500\|INTERNAL"; then
-        echo "[gemini-ask] 서버 내부 오류 (500). 재시도 권장." >&2
+    elif echo "$output" | grep -qE '500|INTERNAL'; then
+        echo "[gemini-ask] 서버 내부 오류 (500)." >&2
         echo "$output"
         return 4
     elif [ $exit_code -ne 0 ] && [ -z "$output" ]; then
