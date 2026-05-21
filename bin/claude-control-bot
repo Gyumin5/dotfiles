@@ -96,10 +96,114 @@ def run_cs(*args, timeout=30):
 def main_menu_markup():
     return {"inline_keyboard": [
         [{"text": "📊 Status", "callback_data": "status"},
-         {"text": "🚧 Bypass…", "callback_data": "menu:bypass"}],
-        [{"text": "📜 Recent…", "callback_data": "menu:recent"},
-         {"text": "🔄 Restart…", "callback_data": "menu:restart"}],
+         {"text": "💻 Resources", "callback_data": "resources"}],
+        [{"text": "🚧 Bypass…", "callback_data": "menu:bypass"},
+         {"text": "📜 Recent…", "callback_data": "menu:recent"}],
+        [{"text": "🔄 Restart…", "callback_data": "menu:restart"}],
     ]}
+
+
+def _fmt_gb(b):
+    return f"{b/1024/1024/1024:.1f}G"
+
+
+def _pct_emoji(pct, warn, danger):
+    if pct >= danger: return "🔴"
+    if pct >= warn: return "⚠️"
+    return "✅"
+
+
+def read_resources():
+    """단일 화면(≤20줄) 리소스 요약. 사고 조기 신호 우선.
+    포함: uptime, load, CPU%, MEM, swap, disk(/, /mnt/Data), 9세션 active/RSS,
+    bun 누락, 1h OOM, 1h restart."""
+    lines = []
+    try:
+        # uptime + load
+        with open("/proc/uptime") as f:
+            up_sec = int(float(f.read().split()[0]))
+        d, rem = divmod(up_sec, 86400); h, rem = divmod(rem, 3600); m, _ = divmod(rem, 60)
+        with open("/proc/loadavg") as f:
+            la = f.read().split()[:3]
+        ncpu = os.cpu_count() or 1
+        la_em = _pct_emoji(float(la[0]) / ncpu * 100, 70, 100)
+        lines.append(f"⏱ up {d}d{h}h{m}m | load {la_em} {la[0]}/{la[1]}/{la[2]} (cpu={ncpu})")
+
+        # CPU% (1초 샘플)
+        def _cpu():
+            with open("/proc/stat") as f:
+                p = f.readline().split()[1:8]
+            t = list(map(int, p)); return sum(t), t[3]
+        t1, i1 = _cpu(); time.sleep(0.5); t2, i2 = _cpu()
+        cpu_pct = int(round((1 - (i2-i1)/max(1, t2-t1)) * 100))
+        lines.append(f"{_pct_emoji(cpu_pct, 70, 90)} CPU {cpu_pct}%")
+
+        # MEM / swap
+        mi = {}
+        with open("/proc/meminfo") as f:
+            for ln in f:
+                k, v = ln.split(":", 1)
+                mi[k] = int(v.strip().split()[0]) * 1024
+        used = mi["MemTotal"] - mi["MemAvailable"]
+        mem_pct = int(round(used / mi["MemTotal"] * 100))
+        swap_used = mi.get("SwapTotal", 0) - mi.get("SwapFree", 0)
+        swap_pct = int(round(swap_used / mi["SwapTotal"] * 100)) if mi.get("SwapTotal") else 0
+        sw_em = _pct_emoji(swap_pct, 30, 60)
+        lines.append(f"{_pct_emoji(mem_pct, 70, 85)} MEM {mem_pct}% ({_fmt_gb(used)}/{_fmt_gb(mi['MemTotal'])}) | {sw_em} swap {swap_pct}% ({_fmt_gb(swap_used)})")
+
+        # Disk
+        for mp, label in [("/", "/"), ("/mnt/Data", "/mnt/Data")]:
+            try:
+                st = os.statvfs(mp)
+                total = st.f_blocks * st.f_frsize
+                free = st.f_bavail * st.f_frsize
+                used_p = int(round((1 - free/total) * 100))
+                lines.append(f"{_pct_emoji(used_p, 80, 90)} disk {label} {used_p}% (free {_fmt_gb(free)})")
+            except Exception:
+                pass
+
+        # Claude services
+        names = list_sessions()
+        active = failed = bun_missing = 0
+        rss_list = []
+        for n in names:
+            ok, bun = session_health(n)
+            if ok: active += 1
+            else: failed += 1
+            if ok and not bun: bun_missing += 1
+            # RSS (cgroup memory.current 우선)
+            for cp in (f"/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/claude-{n}.service/memory.current",):
+                try:
+                    rss_list.append((n, int(open(cp).read().strip())))
+                    break
+                except Exception:
+                    pass
+        rss_total = sum(r for _, r in rss_list)
+        svc_em = "🔴" if failed else ("⚠️" if bun_missing else "✅")
+        lines.append(f"{svc_em} claude svc {active}/{len(names)} active, failed={failed}, bun_missing={bun_missing}")
+        if rss_list:
+            top = sorted(rss_list, key=lambda x: -x[1])[:3]
+            top_s = " ".join(f"{n}={_fmt_gb(r)}" for n, r in top)
+            lines.append(f"  RSS total {_fmt_gb(rss_total)} | top: {top_s}")
+
+        # 1h OOM + restart
+        try:
+            oom_out = subprocess.run(
+                ["journalctl", "--user", "--since", "1 hour ago", "-q"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+            oom = sum(1 for ln in oom_out.splitlines() if "oom-killer" in ln.lower() or "out of memory" in ln.lower())
+            restart = sum(1 for ln in oom_out.splitlines() if "claude-" in ln and "Started" in ln)
+            oom_em = "🔴" if oom else "✅"
+            rs_em = "⚠️" if restart > 2 else "✅"
+            lines.append(f"{oom_em} 1h OOM={oom} | {rs_em} restart={restart}")
+        except Exception:
+            pass
+
+        lines.append(f"\n_{time.strftime('%Y-%m-%d %H:%M:%S KST')}_")
+    except Exception as e:
+        lines.append(f"[resources error] {e}")
+    return "\n".join(lines)
 
 
 BYPASS_DIR = Path.home() / ".claude" / "state"
@@ -394,6 +498,9 @@ def handle_callback(cb):
     elif data == "status":
         out = read_statusline()
         send_result_and_menu(chat_id, out)
+    elif data == "resources":
+        out = read_resources()
+        send_result_and_menu(chat_id, out)
     elif data == "restart-all":
         out = run_cs("restart-all", timeout=60)
         send_result_and_menu(chat_id, f"restart-all:\n{out}")
@@ -461,6 +568,9 @@ def handle_message(msg):
     elif text == "/status":
         out = read_statusline()
         send_result_and_menu(chat_id, out)
+    elif text == "/resources":
+        out = read_resources()
+        send_result_and_menu(chat_id, out)
     elif text == "/list":
         out = run_cs("list")
         send_result_and_menu(chat_id, f"```\n{out}\n```")
@@ -482,6 +592,7 @@ def setup_commands():
         {"command": "menu", "description": "메인 메뉴"},
         {"command": "list", "description": "모든 세션 상태"},
         {"command": "status", "description": "토큰 사용량/리셋 타임"},
+        {"command": "resources", "description": "시스템 리소스 (CPU/MEM/디스크/세션)"},
         {"command": "restart_all", "description": "모든 세션 재시작"},
     ]
     # 각 세션별 restart 명령도 자동 등록
