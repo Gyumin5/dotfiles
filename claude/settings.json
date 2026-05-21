@@ -167,6 +167,14 @@
             "command": "/home/gmoh/.claude/hooks/skill-call-log.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/gmoh/.claude/hooks/progress-delta.sh"
+          }
+        ]
       }
     ],
     "PreCompact": [

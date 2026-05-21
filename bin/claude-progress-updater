@@ -96,8 +96,8 @@ for line in sys.stdin:
 " > "$DIFF_FILE"
 
 diff_size=$(wc -c < "$DIFF_FILE")
-# 토큰 절약: 의미 있는 분량(>=1500 bytes)일 때만 실행. 잡담만 있으면 skip.
-if [ "$diff_size" -lt 1500 ]; then
+# 2026-05-21: skip 룰 완화 (1500 → 300). 도구 위주 세션도 갱신 빈도 증가.
+if [ "$diff_size" -lt 300 ]; then
     log "diff too small ($diff_size bytes), skip"
     echo "$cur_lines" > "$STATE_FILE"
     exit 0
@@ -117,6 +117,16 @@ HIST="$CWD/history.md"
 existing_prog=""
 [ -f "$PROG" ] && existing_prog=$(head -c 8000 "$PROG")
 
+# 2026-05-21: PostToolUse delta jsonl 도 프롬프트에 포함 (도구 위주 세션 활동 흔적).
+# 마지막 100줄만, 합쳐 5KB 이내로 자름.
+DELTA_FILE="$HOME/.claude/state/progress-delta/$(basename "$CWD").jsonl"
+delta_summary=""
+if [ -f "$DELTA_FILE" ]; then
+    delta_summary=$(tail -n 100 "$DELTA_FILE" 2>/dev/null \
+        | jq -r '"[" + (.ts // "?")[11:19] + "] " + .kind + " " + (.hint // "")' 2>/dev/null \
+        | tail -c 5000)
+fi
+
 # claude -p로 progress.md 갱신본 + history.md 새 entry 생성
 PROMPT=$(cat <<EOF
 다음은 진행 중인 작업의 transcript 요약과 기존 progress.md다. 새 entries를 반영해서 progress.md를 갱신해라.
@@ -126,6 +136,9 @@ $existing_prog
 
 ## 새 transcript (마지막 처리 후 추가분)
 $(cat "$DIFF_FILE")
+
+## 최근 도구 활동 (PostToolUse delta — text turn 없이 실행된 명령/편집 흔적)
+$delta_summary
 
 ## 작업
 1. 기존 progress.md 위에 새 entries에서 의미있는 결정/방향 변경/작업 완료/블로커만 반영해서 갱신본 작성
@@ -142,8 +155,8 @@ log "calling claude -p (diff=$diff_size bytes, prog=${#existing_prog} bytes)"
 # - rate-limit-prompt-guard: 자동 작업이므로 큐잉 대상 아님.
 NEW_PROG=$(CLAUDE_AUTOMATED=1 timeout 90 claude -p "$PROMPT" 2>> "$LOG_FILE")
 
-if [ -z "$NEW_PROG" ] || [ "${#NEW_PROG}" -lt 100 ]; then
-    log "claude returned empty/short response, skip"
+if [ -z "$NEW_PROG" ] || [ "${#NEW_PROG}" -lt 50 ]; then
+    log "claude returned empty/short response (<50 chars), skip"
     exit 0
 fi
 
