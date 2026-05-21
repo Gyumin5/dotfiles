@@ -1,3 +1,10 @@
 *.bak.*
 __pycache__/
 *.pyc
+
+# test-claude 세션 운영 메타파일 (cwd=dotfiles 이주 후 — 2026-05-21)
+/progress.md
+/history.md
+/history/
+/proposed-progress.md
+/.claude/
