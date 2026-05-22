@@ -87,8 +87,9 @@ def load_bot_token(cwd):
 
 
 def send_alert(token, proj, snippet):
-    msg = (f"[{proj}] API 5xx 막힘 감지 — 같은 메시지 재전송 부탁.\n"
-           f"패턴: {snippet[:200]}")
+    m = re.search(r"API Error:\s*(5\d\d)", snippet)
+    code = m.group(1) if m else "5xx"
+    msg = f"[{proj}] API {code} — 재전송 필요"
     data = urllib.parse.urlencode({
         "chat_id": CHAT_ID,
         "text": msg,
