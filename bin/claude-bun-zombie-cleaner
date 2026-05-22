@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""
+claude-bun-zombie-cleaner
+
+plugin:telegram bun 프로세스 중 cwd 가 deleted 경로에 묶인 orphan 만 정리.
+"활성 세션의 정상 bun" 은 절대 건드리지 않음.
+
+판정 기준 (ALL 만족 시 SIGTERM):
+1) 프로세스 cmdline 에 'bun' + 'plugin' + 'telegram' 포함
+2) /proc/<pid>/cwd 의 readlink 결과가 ' (deleted)' suffix
+3) /proc/<pid>/cgroup 의 claude-<proj>.service 가 (a) 존재 안 함 또는 (b) inactive
+   — 즉 그 세션이 이미 죽었는데 bun 만 orphan 으로 남은 경우
+
+로그: ~/.claude/state/bun-zombie-cleaner.log (1KB 넘으면 truncate)
+"""
+import os
+import re
+import signal
+import subprocess
+import time
+from pathlib import Path
+
+LOG = Path.home() / ".claude" / "state" / "bun-zombie-cleaner.log"
+LOG_MAX = 4096
+
+
+def log(line):
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y-%m-%d %H:%M:%S KST")
+    try:
+        if LOG.is_file() and LOG.stat().st_size > LOG_MAX:
+            LOG.write_text("")
+        with LOG.open("a") as f:
+            f.write(f"[{ts}] {line}\n")
+    except Exception:
+        pass
+
+
+def cmdline(pid):
+    try:
+        return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode(errors="ignore")
+    except Exception:
+        return ""
+
+
+def cwd_link(pid):
+    try:
+        # readlink raw — kernel 이 deleted file 에 ' (deleted)' suffix 붙임
+        out = subprocess.run(
+            ["readlink", f"/proc/{pid}/cwd"],
+            capture_output=True, text=True, timeout=2,
+        ).stdout.strip()
+        return out
+    except Exception:
+        return ""
+
+
+def cgroup_service(pid):
+    try:
+        cg = Path(f"/proc/{pid}/cgroup").read_text(errors="ignore")
+        m = re.search(r"claude-([^/]+)\.service", cg)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def service_active(proj):
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "is-active", f"claude-{proj}.service"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip() == "active"
+    except Exception:
+        return False
+
+
+def is_orphan_bun(pid):
+    cmd = cmdline(pid)
+    if "bun" not in cmd or "plugin" not in cmd or "telegram" not in cmd:
+        return False, "not-bun-telegram"
+    cwd = cwd_link(pid)
+    if not cwd.endswith(" (deleted)"):
+        return False, "cwd-normal"
+    proj = cgroup_service(pid)
+    if proj is None:
+        return True, "no-cgroup"
+    if not service_active(proj):
+        return True, f"service-inactive:{proj}"
+    return False, f"active-service:{proj}"
+
+
+def degraded_active_bun(pid):
+    """활성 세션인데 bun cwd 가 deleted — 끊김 위험. kill 안 하고 알림."""
+    cmd = cmdline(pid)
+    if "bun" not in cmd or "plugin" not in cmd or "telegram" not in cmd:
+        return None
+    cwd = cwd_link(pid)
+    if not cwd.endswith(" (deleted)"):
+        return None
+    proj = cgroup_service(pid)
+    if proj is None or not service_active(proj):
+        return None
+    return proj
+
+
+ALERT_FLAG = Path.home() / ".claude" / "state" / "bun-zombie-alert"
+
+
+def alert_degraded(projs):
+    if not projs:
+        return
+    ALERT_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    # 같은 prj 1회 알림 (계속 발화 방지). 사용자 cs restart 후 자동 해제 (다음 tick 에 cwd 정상되면 flag 안 만듦, 또 끊기면 flag 만들어 다시 알림).
+    flag = ALERT_FLAG.with_suffix(".sent")
+    sent_set = set()
+    if flag.is_file():
+        try:
+            sent_set = set(flag.read_text().split())
+        except Exception:
+            pass
+    new = [p for p in projs if p not in sent_set]
+    if not new:
+        return
+    # 컨트롤봇 토큰 환경 (~/dotfiles/.claude/telegram/.env) 사용
+    env_path = Path.home() / "dotfiles" / ".claude" / "telegram" / ".env"
+    token = None
+    if env_path.is_file():
+        for line in env_path.read_text(errors="ignore").splitlines():
+            if line.startswith("TELEGRAM_BOT_TOKEN="):
+                token = line.split("=", 1)[1].strip().strip('"').strip("'")
+                break
+    if not token:
+        return
+    msg = f"bun degraded (cwd deleted) — cs restart 필요: {', '.join(new)}"
+    import urllib.parse, urllib.request
+    data = urllib.parse.urlencode({"chat_id": "8689118207", "text": msg}).encode()
+    try:
+        urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage",
+                               data=data, timeout=10).read()
+    except Exception:
+        return
+    flag.write_text(" ".join(sent_set | set(new)))
+    log(f"alerted degraded={new}")
+
+
+def main():
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", "bun.*plugin.*telegram"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        return
+    killed = 0
+    degraded_projs = []
+    healthy_projs = []
+    for line in out.splitlines():
+        pid = line.strip()
+        if not pid.isdigit():
+            continue
+        orphan, reason = is_orphan_bun(pid)
+        if orphan:
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+                log(f"killed pid={pid} reason={reason}")
+                killed += 1
+            except Exception as e:
+                log(f"kill-fail pid={pid} err={e}")
+            continue
+        # 활성 세션의 degraded bun
+        proj = degraded_active_bun(pid)
+        if proj:
+            degraded_projs.append(proj)
+        else:
+            # 정상 cwd 인 active 세션
+            cmd = cmdline(pid)
+            if "bun" in cmd and "plugin" in cmd and "telegram" in cmd:
+                p = cgroup_service(pid)
+                if p and service_active(p):
+                    healthy_projs.append(p)
+    if killed:
+        log(f"total killed={killed}")
+    if degraded_projs:
+        alert_degraded(degraded_projs)
+    # 회복된 세션은 flag 에서 제거 (다음 끊김 시 다시 알림)
+    flag = ALERT_FLAG.with_suffix(".sent")
+    if flag.is_file() and healthy_projs:
+        try:
+            sent_set = set(flag.read_text().split())
+            new_set = sent_set - set(healthy_projs)
+            if new_set != sent_set:
+                flag.write_text(" ".join(new_set))
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()
