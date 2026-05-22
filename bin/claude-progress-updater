@@ -159,7 +159,13 @@ log "calling claude -p (diff=$diff_size bytes, prog=${#existing_prog} bytes)"
 # CLAUDE_AUTOMATED=1: 자동 hook들이 사용자 세션이 아님을 인지해서 스킵하도록.
 # - telegram-reply-injector / enforcer: prompt 안에 채널 태그 있어도 reply 강제 X (이전 leak 원인).
 # - rate-limit-prompt-guard: 자동 작업이므로 큐잉 대상 아님.
-NEW_PROG=$(CLAUDE_AUTOMATED=1 timeout 90 claude -p "$PROMPT" 2>> "$LOG_FILE")
+# --strict-mcp-config + 빈 mcp config: plugin:telegram 등 MCP 미로드.
+#   이유: 자식 claude 가 부모와 같은 봇 토큰으로 getUpdates 들어가면 Telegram 이
+#   "Conflict: terminated by other getUpdates request" 반환해 부모 bun 끊김.
+EMPTY_MCP_CFG=$(mktemp -t empty-mcp-XXXX.json)
+echo '{"mcpServers": {}}' > "$EMPTY_MCP_CFG"
+NEW_PROG=$(CLAUDE_AUTOMATED=1 timeout 90 claude --strict-mcp-config --mcp-config "$EMPTY_MCP_CFG" -p "$PROMPT" 2>> "$LOG_FILE")
+rm -f "$EMPTY_MCP_CFG"
 
 if [ -z "$NEW_PROG" ] || [ "${#NEW_PROG}" -lt 300 ]; then
     log "claude returned empty/short response (<300 chars), skip"
