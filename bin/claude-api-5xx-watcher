@@ -108,14 +108,14 @@ def process(proj):
     if not jsonl:
         return
     state_file = STATE_DIR / f"{proj}.last"
-    last_uuid = ""
-    if state_file.is_file():
-        last_uuid = state_file.read_text().strip()
+    seeded = state_file.is_file()
+    last_uuid = state_file.read_text().strip() if seeded else ""
     new_last = last_uuid
     found_new = False
     alerts = []
     try:
         with jsonl.open("r", errors="ignore") as f:
+            # 첫 시드 (state 파일 없음): 알림 안 보내고 끝까지 스캔만.
             seen_last = (last_uuid == "")
             for line in f:
                 line = line.strip()
@@ -150,7 +150,8 @@ def process(proj):
     if found_new:
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(new_last)
-    if alerts:
+    # 시드 첫 실행 (seeded=False) 에는 알림 송신 안 함 — 과거 에러 스팸 방지.
+    if alerts and seeded:
         token = load_bot_token(cwd)
         if token:
             for snippet in alerts:
