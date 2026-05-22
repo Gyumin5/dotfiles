@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""
+claude-api-5xx-watcher
+
+각 claude-<proj>.service 의 최신 jsonl 을 tail 하며 assistant 메시지에
+"API Error: 5xx" 패턴이 나오면 해당 프로젝트 봇으로 텔레그램 알림.
+
+쿨다운 없음 — 5xx 가 N번 발생하면 N번 알림.
+오프셋 (uuid 기준 마지막 처리 메시지) 은 ~/.claude/state/api-5xx-watcher/<proj>.last 저장.
+"""
+import json
+import os
+import re
+import subprocess
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+CHAT_ID = "8689118207"
+STATE_DIR = Path.home() / ".claude" / "state" / "api-5xx-watcher"
+PROJECTS_DIR = Path.home() / ".claude" / "projects"
+ERROR_RE = re.compile(r"API Error:\s*5\d\d")
+
+
+def list_services():
+    """active claude-<proj>.service 목록."""
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "list-units", "claude-*.service",
+             "--no-legend", "--state=active", "--plain"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:
+        return []
+    names = []
+    for line in out.splitlines():
+        unit = line.split()[0] if line.strip() else ""
+        if unit.startswith("claude-") and unit.endswith(".service"):
+            proj = unit[len("claude-"):-len(".service")]
+            # 보조 서비스 제외
+            if proj in {"progress-updater", "rate-limit-recovery",
+                         "daily-research", "control-bot", "watchdog",
+                         "bun-ensure", "memory-lifecycle", "resume",
+                         "weekly-stability-check", "telegram-healthcheck"}:
+                continue
+            names.append(proj)
+    return names
+
+
+def workingdir(proj):
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "show", f"claude-{proj}.service",
+             "-p", "WorkingDirectory"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        return out.split("=", 1)[1] if "=" in out else ""
+    except Exception:
+        return ""
+
+
+def latest_jsonl(cwd):
+    """cwd 에 해당하는 ~/.claude/projects/<key>/<uuid>.jsonl 중 최신."""
+    if not cwd:
+        return None
+    key = "-" + cwd.lstrip("/").replace("/", "-")
+    proj_dir = PROJECTS_DIR / key
+    if not proj_dir.is_dir():
+        return None
+    candidates = [p for p in proj_dir.iterdir()
+                  if p.is_file() and p.suffix == ".jsonl"
+                  and not p.name.endswith(".MIGRATED.jsonl")]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def load_bot_token(cwd):
+    env_path = Path(cwd) / ".claude" / "telegram" / ".env"
+    if not env_path.is_file():
+        return None
+    for line in env_path.read_text(errors="ignore").splitlines():
+        if line.startswith("TELEGRAM_BOT_TOKEN="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return None
+
+
+def send_alert(token, proj, snippet):
+    msg = (f"[{proj}] API 5xx 막힘 감지 — 같은 메시지 재전송 부탁.\n"
+           f"패턴: {snippet[:200]}")
+    data = urllib.parse.urlencode({
+        "chat_id": CHAT_ID,
+        "text": msg,
+    }).encode()
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        urllib.request.urlopen(url, data=data, timeout=10).read()
+    except Exception:
+        pass
+
+
+def process(proj):
+    cwd = workingdir(proj)
+    if not cwd:
+        return
+    jsonl = latest_jsonl(cwd)
+    if not jsonl:
+        return
+    state_file = STATE_DIR / f"{proj}.last"
+    last_uuid = ""
+    if state_file.is_file():
+        last_uuid = state_file.read_text().strip()
+    new_last = last_uuid
+    found_new = False
+    alerts = []
+    try:
+        with jsonl.open("r", errors="ignore") as f:
+            seen_last = (last_uuid == "")
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                uuid = rec.get("uuid", "")
+                if not seen_last:
+                    if uuid == last_uuid:
+                        seen_last = True
+                    continue
+                # 새 메시지
+                if rec.get("type") == "assistant":
+                    content = rec.get("message", {}).get("content")
+                    text = ""
+                    if isinstance(content, list):
+                        for blk in content:
+                            if isinstance(blk, dict) and blk.get("type") == "text":
+                                text += blk.get("text", "")
+                    elif isinstance(content, str):
+                        text = content
+                    if text and ERROR_RE.search(text):
+                        alerts.append(text)
+                if uuid:
+                    new_last = uuid
+                    found_new = True
+    except Exception:
+        return
+    if found_new:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(new_last)
+    if alerts:
+        token = load_bot_token(cwd)
+        if token:
+            for snippet in alerts:
+                send_alert(token, proj, snippet)
+
+
+def main():
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    for proj in list_services():
+        try:
+            process(proj)
+        except Exception:
+            continue
+
+
+if __name__ == "__main__":
+    main()
