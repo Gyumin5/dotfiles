@@ -97,6 +97,24 @@ for d in current_turn:
                                 "mcp__plugin_telegram_telegram__react"):
                         has_reply = True
 
+# 5xx (예: 529 Overloaded) 으로 끝난 턴은 BLOCK 금지 — retry dead loop 방지.
+import re
+api5xx = False
+for d in reversed(current_turn):
+    if d.get("type") != "assistant":
+        continue
+    c = (d.get("message", {}) or {}).get("content", [])
+    if isinstance(c, list):
+        for it in c:
+            if isinstance(it, dict) and it.get("type") == "text":
+                if re.search(r"API Error:\s*5\d\d", it.get("text", "")):
+                    api5xx = True
+                    break
+    if api5xx:
+        break
+if api5xx:
+    print("PASS"); sys.exit(0)
+
 print("BLOCK" if (has_channel and not has_reply) else "PASS")
 PYEOF
 )
