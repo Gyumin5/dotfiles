@@ -157,29 +157,31 @@ fi
 # ── 2. ai-debate 평가 호출 ──
 CANDIDATES_JSON=$(cat "$CANDIDATES_FILE")
 
-DEBATE_TASK="아래는 지난 7일 인터넷에서 화제가 된 기술/논문 후보다 — HackerNews 인기 글, GitHub trending repo, arXiv cs.AI/LG/RO 최신 논문에서 자동 수집. 운영자(소속: AV/SLAM 연구, ROS 사용, 9개 Claude Code 세션 운영, dotfiles 관리, 논문 작성)에게 보낼 한국어 평문 추천 브리핑을 작성하라.
+DEBATE_TASK="아래는 지난 7일 화제가 된 기술/논문 후보 (HN, GitHub trending, arXiv cs.AI/LG/RO). 운영자 맥락: AV/SLAM 연구, ROS, 9개 Claude Code 세션, dotfiles 관리, 논문 작성.
+
+목표: 후보 카탈로그 나열 금지. 토론·합의 끝에 운영자가 이번 주 실제로 해야 할 단 1건만 결정. 없으면 '이번 주 변경 없음' 으로 결론.
 
 작업 방식 (엄격)
-- 모든 후보를 평가한 뒤 운영자 맥락에서 상위 5건만 골라 짧게 정리한다.
-- 5건 내부 토론을 거쳐 그 중 '이번 주 실제 적용 추천' 1건을 결정한다 (없으면 0건 명시).
-- 보류 카탈로그·무관 목록은 본문에 포함하지 마라.
+- 모든 후보를 내부적으로 평가. 본문에 카탈로그·후보 리스트·운영자 의미·번호 매기기 금지.
+- 토론으로 1건 결정 (또는 변경 없음 결정).
+- 1건이 선정되면 그게 무엇이고, 왜 지금 필요하며, 무엇을 어떻게 해야 하는지를 운영자가 바로 실행할 수준의 구체 명령으로 제공.
+- '검토 후 적용' 같은 모호한 행동 금지. 실행 명령 또는 '실행 불필요' 결정.
 
-평가 관점
-- 트렌드 핵심: 어떤 패러다임/주제가 뜨고 있는지 (agentic, retrieval, robotics, 도구체인 등)
-- 사용자 연관성: AV/SLAM·로봇·논문·LLM 워크플로우·자동화 중 어느 축과 닿는지
-- 적용 가치: 30분~수 시간 PoC로 검증 가능한지, 운영 위험은 어떤지
+출력 형식 (평문 한국어, 1200자 이내, 한 덩어리)
+- 백틱·코드펜스·굵게·들여쓰기·번호 매기기 금지.
+- 첫 줄: '이번 주 트렌드: <1문장>'
+- 둘째 줄 빈 줄.
+- '결정: <도입할 것 또는 변경 없음>'
+- '이유: <왜 이번 주에 필요한지 2~3문장. 운영자 현 워크플로우와 직접 연결>'
+- '실행: <bash 명령 또는 구체 단계 1~3줄, 복붙 가능 형식>' 또는 '실행 불필요'
+- '위험: <이 행동의 리스크 1문장 또는 없으면 생략>'
+- '검증: <어떻게 효과 확인할지 1문장>'
+- '출처: <URL 1개, 결정 근거가 된 후보>'
 
-출력 형식 (평문 한국어, 한 덩어리, 2500자 이내)
-- 백틱·코드펜스·굵게 금지. 들여쓰기·맨앞 공백 금지.
-- 첫 줄: 이번 주 트렌드 한 줄.
-- 그 다음 상위 5건, 각 3~4줄. 줄 구조 강제:
-  '제목'
-  'URL: <후보의 url 필드 그대로>'
-  'source: <hackernews|github-trending|arxiv-*>'
-  핵심 한 줄
-  운영자 의미 한 줄
-- URL 필드가 없는 후보는 제외하라.
-- 마지막에 '이번 주 적용 추천: <후보 제목> — <사유 한 문장>' 또는 '이번 주 적용 추천 없음 — <사유 한 문장>'.'
+규칙
+- 결정이 '변경 없음' 이면 이유·검증·출처 모두 채우되 실행/위험 생략.
+- 출처 URL 1개만. 카탈로그 링크 나열 금지.
+- 후보가 stars 5 미만, license 불명, 운영 무관이면 결정 후보에서 제외.
 
 후보 (JSON lines):
 ${CANDIDATES_JSON}"
@@ -188,55 +190,21 @@ log "ai-debate start"
 DEBATE_OUT=$(timeout 1200 ai-debate --no-cache --max-rounds 1 "$DEBATE_TASK" 2>> "$LOG_FILE") || true
 log "ai-debate exit. length=${#DEBATE_OUT}"
 
-if [ "${#DEBATE_OUT}" -lt 500 ]; then
+if [ "${#DEBATE_OUT}" -lt 200 ]; then
     abort ai_debate "short_output_len_${#DEBATE_OUT}"
 fi
 
-# arbiter FINAL 섹션 추출 (없으면 전체 사용).
-# 본문 = final_decision (5건 briefing). 결정 블록 = rationale/risks/action_steps 첫 줄 합성.
-# 운영자가 별도 토론 호출 안 해도 도입 결정/위험/다음 행동까지 한 메시지에 포함.
+# arbiter final_decision 사용 (이미 결정/이유/실행/위험/검증/출처 자체 포함).
 ARB_RUN_DIR=$(echo "$DEBATE_OUT" | awk '/^artifacts=/{sub("artifacts=",""); print; exit}')
 OUTPUT=""
-DECISION_BLOCK=""
 if [ -n "$ARB_RUN_DIR" ] && [ -f "$ARB_RUN_DIR/arbiter.normalized.json" ]; then
     OUTPUT=$(jq -r '.final_decision // ""' "$ARB_RUN_DIR/arbiter.normalized.json" 2>/dev/null)
-    # 결정 블록 합성: rationale 첫 2문장 + risks 첫 2문장 + action_steps 첫 실행 가능한 항목.
-    # python 으로 문장 경계에서 자르고 메타 step 필터.
-    DECISION_BLOCK=$(jq -r '.rationale, .risks, .action_steps' "$ARB_RUN_DIR/arbiter.normalized.json" 2>/dev/null | python3 -c '
-import sys, re
-lines = sys.stdin.read().split("\n")
-rat = lines[0] if len(lines)>0 else ""
-rsk = lines[1] if len(lines)>1 else ""
-act = " ".join(lines[2:]) if len(lines)>2 else ""
-
-def first_n_sentences(s, n=2, maxlen=350):
-    parts = re.split(r"(?<=[.다요\?\!])\s+", s.strip())
-    out = " ".join(parts[:n])
-    return out[:maxlen]
-
-# action_steps 에서 메타("final_decision", "브리핑", "본문") 제거 후 첫 진짜 행동.
-steps = re.split(r"\s*(?:\d+\.\s+|^\d+\)\s+)", act)
-steps = [s.strip() for s in steps if s.strip()]
-meta = re.compile(r"final_decision|브리핑|본문|아카이브")
-real_steps = [s for s in steps if not meta.search(s)]
-step1 = real_steps[0] if real_steps else (steps[0] if steps else "")
-step1 = first_n_sentences(step1, n=2, maxlen=350)
-
-print("도입 결정 사유: " + first_n_sentences(rat, n=2, maxlen=350))
-print("주요 위험: " + first_n_sentences(rsk, n=2, maxlen=300))
-print("첫 행동: " + step1)
-' 2>/dev/null)
-    [ -n "$DECISION_BLOCK" ] && DECISION_BLOCK=$(printf '\n%s\n' "$DECISION_BLOCK")
 fi
 # fallback: stdout 전체 (구버전 호환)
 if [ -z "$OUTPUT" ]; then
     OUTPUT=$(echo "$DEBATE_OUT" | awk '/^--- ARBITER/{flag=1} flag{print}')
 fi
 [ -z "$OUTPUT" ] && OUTPUT="$DEBATE_OUT"
-# 결정 블록 append (본문이 정상 추출됐을 때만)
-if [ -n "$DECISION_BLOCK" ] && [ "${#OUTPUT}" -gt 500 ]; then
-    OUTPUT="${OUTPUT}${DECISION_BLOCK}"
-fi
 
 # URL 가드: 본문 안에 http 링크 ≥ 3.
 url_count=$(echo "$OUTPUT" | grep -oE 'https?://[^ )"]+' | sort -u | wc -l)
@@ -269,8 +237,7 @@ if [ -z "$BOT_TOKEN" ]; then
     abort telegram "no_token"
 fi
 
-HEADER="Claude Code 개선 리서치 ${TODAY}
-후보 ${candidate_count}건, URL ${url_count}개. 다음 SessionStart 시 컨텍스트 자동 흡수.
+HEADER="일일 리서치 ${TODAY} (후보 ${candidate_count}건 평가)
 
 "
 FULL_MSG="${HEADER}${OUTPUT}"
