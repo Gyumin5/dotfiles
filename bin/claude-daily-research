@@ -194,11 +194,60 @@ if [ "${#DEBATE_OUT}" -lt 200 ]; then
     abort ai_debate "short_output_len_${#DEBATE_OUT}"
 fi
 
-# arbiter final_decision 사용 (이미 결정/이유/실행/위험/검증/출처 자체 포함).
+# arbiter 다중 필드를 단일 결정 형식으로 조립.
+# arbiter JSON 스키마는 final_decision(1줄 헤드라인) + rationale + action_steps + risks + verification_plan 분리.
+# 새 형식: 트렌드/결정/이유/실행/위험/검증/출처 한 덩어리.
 ARB_RUN_DIR=$(echo "$DEBATE_OUT" | awk '/^artifacts=/{sub("artifacts=",""); print; exit}')
 OUTPUT=""
 if [ -n "$ARB_RUN_DIR" ] && [ -f "$ARB_RUN_DIR/arbiter.normalized.json" ]; then
-    OUTPUT=$(jq -r '.final_decision // ""' "$ARB_RUN_DIR/arbiter.normalized.json" 2>/dev/null)
+    ARB_JSON="$ARB_RUN_DIR/arbiter.normalized.json"
+    DECISION=$(jq -r '.final_decision // ""' "$ARB_JSON" 2>/dev/null)
+    RATIONALE=$(jq -r '.rationale // ""' "$ARB_JSON" 2>/dev/null)
+    ACTION=$(jq -r '.action_steps // ""' "$ARB_JSON" 2>/dev/null)
+    RISKS=$(jq -r '.risks // ""' "$ARB_JSON" 2>/dev/null)
+    VERIFY=$(jq -r '.verification_plan // ""' "$ARB_JSON" 2>/dev/null)
+
+    # 후보 중 rationale·decision 본문에 title 토큰 가장 많이 매칭되는 1건 URL 선정.
+    SOURCE_URL=$(BODY="${DECISION}
+${RATIONALE}
+${ACTION}" CAND_FILE="$CANDIDATES_FILE" python3 - <<'PY' 2>/dev/null
+import json, os, re
+body = os.environ.get("BODY", "").lower()
+best_url = ""
+best_score = 0
+with open(os.environ["CAND_FILE"]) as f:
+    for line in f:
+        try:
+            c = json.loads(line)
+        except Exception:
+            continue
+        title = (c.get("title") or "").lower()
+        url = c.get("url") or ""
+        if not url:
+            continue
+        tokens = [t for t in re.split(r"[\s/:._\-]+", title) if len(t) >= 4]
+        if not tokens:
+            continue
+        score = sum(1 for t in tokens if t in body)
+        if score > best_score:
+            best_score = score
+            best_url = url
+print(best_url)
+PY
+)
+
+    {
+        echo "이번 주 트렌드: ${DECISION}"
+        echo
+        echo "결정: ${DECISION}"
+        [ -n "$RATIONALE" ] && echo "이유: ${RATIONALE}"
+        [ -n "$ACTION" ] && echo "실행:"
+        [ -n "$ACTION" ] && echo "${ACTION}"
+        [ -n "$RISKS" ] && echo "위험: ${RISKS}"
+        [ -n "$VERIFY" ] && echo "검증: ${VERIFY}"
+        [ -n "$SOURCE_URL" ] && echo "출처: ${SOURCE_URL}"
+    } > "$ARB_RUN_DIR/_assembled.txt"
+    OUTPUT=$(cat "$ARB_RUN_DIR/_assembled.txt")
 fi
 # fallback: stdout 전체 (구버전 호환)
 if [ -z "$OUTPUT" ]; then
@@ -206,13 +255,9 @@ if [ -z "$OUTPUT" ]; then
 fi
 [ -z "$OUTPUT" ] && OUTPUT="$DEBATE_OUT"
 
-# URL 가드: 본문 안에 http 링크 ≥ 3.
+# URL 가드: 단일 결정 형식에서는 0건 허용 (변경 없음 결정이면 URL 없을 수 있음).
 url_count=$(echo "$OUTPUT" | grep -oE 'https?://[^ )"]+' | sort -u | wc -l)
 log "url_count=$url_count"
-# 트렌드 브리핑은 narrative 위주라 URL 적을 수 있음. 최소 1.
-if [ "$url_count" -lt 1 ]; then
-    abort guard "url_count_${url_count}"
-fi
 
 status ai_debate true "candidate_count:$candidate_count,url_count:$url_count,output_bytes:${#OUTPUT}"
 
