@@ -81,6 +81,25 @@ case "$TOOL" in
         ;;
 esac
 
+# 2.5. Bash 호출이 외부 AI (codex/agy/ai-debate) 면 통과.
+#      이 명령들은 Claude API 한도와 무관 — 차단 중에도 토론/조사 가능해야 함.
+#      ai-debate 내부에 claude pool 이 있으나 자식 프로세스라 우리 훅 대상 아님 (각 child claude 가 별도 429 핸들).
+if [ "$TOOL" = "Bash" ]; then
+    CMD=$(printf '%s' "$EVENT" | python3 -c 'import json,sys
+try:
+  d=json.loads(sys.stdin.read())
+  inp=d.get("tool_input") or {}
+  print(inp.get("command",""))
+except: print("")' 2>/dev/null)
+    # 명령 첫 토큰 추출 (env VAR=... prefix 무시).
+    FIRST=$(printf '%s' "$CMD" | awk '{for(i=1;i<=NF;i++){if($i !~ /=/){print $i; exit}}}')
+    case "$FIRST" in
+        ai-debate|ai-collaborate|codex-ask|gemini-ask|agy)
+            exit 0
+            ;;
+    esac
+fi
+
 # 3. 5h / 7d 사용량 체크 (둘 중 하나라도 임계 초과면 차단)
 [ -f "$CACHE" ] || exit 0
 INFO=$(python3 -c '
