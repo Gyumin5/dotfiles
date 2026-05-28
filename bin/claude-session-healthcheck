@@ -26,6 +26,23 @@ TOOL_INFLIGHT_WINDOW_SEC = 5 * 60
 # 큐잉된 사용자 prompt 가 누적되면 stuck 으로 판정 (2026-05-11 intensitylio 사고).
 STUCK_NO_ASSISTANT_SEC = 60 * 60
 STUCK_QUEUE_OP_MIN = 3
+# 자동 복구 (2026-05-28 intensitylio 1h thinking hang 사고 후):
+# assistant 무응답 60분 + in-flight tool 없음 + 큐잉 사용자 ≥ 1 + rate-limit 차단 아님
+# + 직전 healthcheck 동일 상태 → 자동 cs restart.
+AUTO_RESTART_ASSISTANT_AGE_SEC = 60 * 60
+AUTO_RESTART_QUEUED_USER_MIN = 1
+# 동일 세션 자동 restart 제한.
+AUTO_RESTART_6H_MAX = 1
+AUTO_RESTART_24H_MAX = 2
+# 글로벌 동시 restart 제한 (한 tick 에 1세션만).
+AUTO_RESTART_GLOBAL_MAX_PER_TICK = 1
+# shadow mode: 실제 cs restart 안 부르고 would-restart 로그만 기록.
+# 7일 운영 검토 후 사용자 승인 시 ~/.claude/state/auto-restart-enforce.flag 생성하여 enforce.
+SHADOW_FLAG = Path.home() / ".claude" / "state" / "auto-restart-enforce.flag"
+AUTO_RESTART_STATE_DIR = Path.home() / ".claude" / "state" / "auto-restart"
+STATUSLINE_CACHE = Path.home() / ".claude" / "statusline_cache.json"
+RATE_LIMIT_5H_BLOCK_PCT = 90
+RATE_LIMIT_7D_BLOCK_PCT = 99
 EXCLUDE_SERVICES = {
     "claude-watchdog.service",
     "claude-control-bot.service",
@@ -269,6 +286,142 @@ def mark_alert(svc):
     flag.touch()
 
 
+def rate_limited():
+    """statusline_cache 기준으로 현재 rate-limit 차단 임계 초과인지."""
+    try:
+        d = json.loads(STATUSLINE_CACHE.read_text())
+        rl = d.get("rate_limits", {}) or {}
+        now_ts = time.time()
+
+        def pct(window):
+            rt = window.get("resets_at")
+            if rt and now_ts > rt:
+                return 0
+            v = window.get("used_percentage")
+            return int(v) if isinstance(v, (int, float)) else 0
+
+        if pct(rl.get("five_hour", {})) >= RATE_LIMIT_5H_BLOCK_PCT:
+            return True
+        if pct(rl.get("seven_day", {})) >= RATE_LIMIT_7D_BLOCK_PCT:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def restart_history(svc):
+    """반환: (count_6h, count_24h, last_ts)."""
+    AUTO_RESTART_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    f = AUTO_RESTART_STATE_DIR / f"{svc}.history"
+    if not f.is_file():
+        return 0, 0, 0
+    now = time.time()
+    c6 = c24 = 0
+    last = 0
+    try:
+        for line in f.read_text().splitlines():
+            try:
+                ts = int(line.strip())
+            except Exception:
+                continue
+            if now - ts <= 6 * 3600:
+                c6 += 1
+            if now - ts <= 24 * 3600:
+                c24 += 1
+            if ts > last:
+                last = ts
+    except Exception:
+        pass
+    return c6, c24, last
+
+
+def record_restart(svc):
+    f = AUTO_RESTART_STATE_DIR / f"{svc}.history"
+    try:
+        with f.open("a") as fp:
+            fp.write(f"{int(time.time())}\n")
+    except Exception:
+        pass
+
+
+def hang_signature(svc, last_assistant_ts, pending_after):
+    """hang 상태 지문 — 직전 tick 과 동일해야 자동 restart 후보 (오탐 가드)."""
+    return f"{svc}|{int(last_assistant_ts or 0)}|{pending_after}"
+
+
+def previous_hang_signature(svc):
+    f = AUTO_RESTART_STATE_DIR / f"{svc}.last-sig"
+    if not f.is_file():
+        return None
+    if time.time() - f.stat().st_mtime > 60 * 60:
+        return None
+    try:
+        return f.read_text().strip()
+    except Exception:
+        return None
+
+
+def save_hang_signature(svc, sig):
+    AUTO_RESTART_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    f = AUTO_RESTART_STATE_DIR / f"{svc}.last-sig"
+    try:
+        f.write_text(sig)
+    except Exception:
+        pass
+
+
+def clear_hang_signature(svc):
+    f = AUTO_RESTART_STATE_DIR / f"{svc}.last-sig"
+    try:
+        f.unlink()
+    except Exception:
+        pass
+
+
+def jsonl_unchanged_recheck(jl_path, last_assistant_ts):
+    """restart 직전 jsonl tail 재확인 — 새 assistant/user 이벤트 있으면 취소.
+
+    반환 True: 안전 (변동 없음), False: 새 이벤트 발견 → restart 취소.
+    """
+    try:
+        events = parse_jsonl_tail(jl_path, n=100)
+        info = analyze_session(events)
+        new_assistant = info["last_assistant_ts"] or 0
+        # 같거나 더 옛 ts 면 변동 없음.
+        if new_assistant > (last_assistant_ts or 0):
+            return False
+        # inflight 가 새로 생겼으면 변동 있음.
+        if info["inflight"]:
+            return False
+    except Exception:
+        # 읽기 실패 시 보수적으로 False (취소).
+        return False
+    return True
+
+
+def snapshot_auto_restart(svc, payload):
+    AUTO_RESTART_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    name = svc.replace("claude-", "").replace(".service", "")
+    f = AUTO_RESTART_STATE_DIR / f"{name}-{ts}.json"
+    try:
+        f.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    except Exception:
+        pass
+    return f
+
+
+def cs_restart(name):
+    try:
+        r = subprocess.run(
+            ["/home/gmoh/dotfiles/bin/cs", "restart", name],
+            capture_output=True, text=True, timeout=60,
+        )
+        return r.returncode == 0, (r.stdout + r.stderr)[-400:]
+    except Exception as e:
+        return False, str(e)
+
+
 def main():
     token = load_control_token()
     services = list_active_services()
@@ -318,49 +471,103 @@ def main():
             ):
                 stuck_loop = True
 
-        # 2026-05-18: stuck-loop 알림 비활성화 (운영자 요청). 일반 무응답 알림도 노이즈 큼.
-        # 필요 시 jsonl 직접 조사. 본 healthcheck 는 continue 만 하고 아무 알림 안 보냄.
-        continue
-        if not stuck_loop:
-            if idle < THRESHOLD_NO_ACTIVITY_SEC:
-                continue
-            if info["inflight"]:
-                continue
-            # 사용자 발화 후 응답 없는 상태일 때만 알림.
-            # 마지막 user_ts 가 마지막 assistant_ts 보다 최근이어야 stuck.
-            if info["last_assistant_ts"] and info["last_user_ts"]:
-                if info["last_assistant_ts"] >= info["last_user_ts"]:
-                    continue
-            elif info["last_event_type"] != "user":
-                continue
-        if not cooldown_ok(svc):
-            continue
+        # 2026-05-28 자동 복구 분기 추가. 알림은 여전히 비활성 (운영자 요청).
+        #
+        # 자동 restart 조건 (모두 만족):
+        # - assistant 마지막 응답으로부터 AUTO_RESTART_ASSISTANT_AGE_SEC 이상
+        # - in-flight tool 없음
+        # - 큐잉된 사용자 메시지 (last_assistant_ts 이후) ≥ AUTO_RESTART_QUEUED_USER_MIN
+        # - rate-limit 차단 상태 아님
+        # - 직전 tick 의 hang signature 와 동일 (2회 연속 동일 상태)
+        # - 6h 내 이 세션 restart 횟수 < AUTO_RESTART_6H_MAX
+        # - 24h 내 이 세션 restart 횟수 < AUTO_RESTART_24H_MAX
+        # - 이번 tick 글로벌 restart 횟수 < AUTO_RESTART_GLOBAL_MAX_PER_TICK
+        # - restart 직전 jsonl 재확인에서 새 event 발견되면 취소
         name = svc.replace("claude-", "").replace(".service", "")
-        if stuck_loop:
-            msg = (
-                f"[healthcheck:stuck-loop] {name} assistant 무응답 "
-                f"{int(assistant_age/60)}분 + 큐잉된 사용자 메시지 {pending_after_assistant}건.\n"
-                f"jsonl: {jl.name}\n"
-                f"in-flight tool: {info['inflight']}\n"
-                f"cwd: {cwd}\n"
-                f"추정: 자율루프 자식이 긴 foreground tool 점유 중.\n"
-                f"조치: 컨트롤봇 → 해당 세션 → restart (claude -c 로 맥락 유지)."
+
+        is_hang_candidate = (
+            assistant_age is not None
+            and assistant_age >= AUTO_RESTART_ASSISTANT_AGE_SEC
+            and not info["inflight"]
+            and pending_after_assistant >= AUTO_RESTART_QUEUED_USER_MIN
+        )
+        if not is_hang_candidate:
+            clear_hang_signature(svc)
+            continue
+
+        if rate_limited():
+            clear_hang_signature(svc)
+            continue
+
+        sig = hang_signature(svc, info["last_assistant_ts"], pending_after_assistant)
+        prev_sig = previous_hang_signature(svc)
+        save_hang_signature(svc, sig)
+        if prev_sig != sig:
+            # 첫 발견 — 다음 tick (15분 후) 확정 후 트리거.
+            continue
+
+        c6, c24, _ = restart_history(svc)
+        if c6 >= AUTO_RESTART_6H_MAX or c24 >= AUTO_RESTART_24H_MAX:
+            continue
+
+        # 글로벌 동시 restart 제한.
+        if len(findings) >= AUTO_RESTART_GLOBAL_MAX_PER_TICK:
+            continue
+
+        # restart 직전 jsonl 재확인 (race 방지).
+        if not jsonl_unchanged_recheck(jl, info["last_assistant_ts"]):
+            clear_hang_signature(svc)
+            continue
+
+        shadow = not SHADOW_FLAG.is_file()
+        payload = {
+            "svc": svc,
+            "name": name,
+            "decided_at": time.strftime("%Y-%m-%d %H:%M:%S KST", time.localtime()),
+            "shadow": shadow,
+            "assistant_age_sec": int(assistant_age),
+            "pending_after_assistant": pending_after_assistant,
+            "inflight": info["inflight"],
+            "last_event_type": info["last_event_type"],
+            "last_assistant_ts": info["last_assistant_ts"],
+            "last_user_ts": info["last_user_ts"],
+            "jsonl": str(jl),
+            "cwd": cwd,
+            "restart_count_6h": c6,
+            "restart_count_24h": c24,
+            "rate_limited": False,
+        }
+
+        if shadow:
+            payload["action"] = "would-restart"
+            snapshot_auto_restart(svc, payload)
+            findings.append(f"{name}(shadow)")
+            continue
+
+        ok, output = cs_restart(name)
+        payload["action"] = "restart"
+        payload["cs_ok"] = ok
+        payload["cs_output_tail"] = output
+        snapshot_auto_restart(svc, payload)
+
+        if ok:
+            record_restart(svc)
+            clear_hang_signature(svc)
+            telegram_alert(
+                token,
+                f"[healthcheck:auto-restart] {name} 자동 복구. "
+                f"무응답 {int(assistant_age/60)}분, 큐잉 {pending_after_assistant}건. "
+                f"6h={c6+1}/{AUTO_RESTART_6H_MAX}, 24h={c24+1}/{AUTO_RESTART_24H_MAX}.",
             )
-        else:
-            msg = (
-                f"[healthcheck] {name} 무응답 {int(idle/60)}분.\n"
-                f"jsonl: {jl.name}\n"
-                f"마지막 event: {info['last_event_type']}\n"
-                f"in-flight tool: {info['inflight']}\n"
-                f"cwd: {cwd}\n"
-                f"조치: 컨트롤봇 → 해당 세션 menu → restart 또는 nudge."
-            )
-        if telegram_alert(token, msg):
-            mark_alert(svc)
             findings.append(name)
+        else:
+            telegram_alert(
+                token,
+                f"[healthcheck:auto-restart] {name} restart 실패: {output[:200]}",
+            )
 
     if findings:
-        print(f"[healthcheck] alerted: {','.join(findings)}", file=sys.stderr)
+        print(f"[healthcheck] auto-restart: {','.join(findings)}", file=sys.stderr)
 
 
 if __name__ == "__main__":
