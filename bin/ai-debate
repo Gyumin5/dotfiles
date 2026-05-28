@@ -469,6 +469,8 @@ def main():
             task = stdin_data + "\n\n---\n\n" + task
 
     # 24h 캐시 검사 (--no-cache 또는 --seed 명시 시 우회)
+    if args.no_cache:
+        print("[ai-debate] --no-cache: 캐시 lookup/write 모두 skip", file=sys.stderr)
     if not args.no_cache and args.seed is None:
         import hashlib
         cache_key_src = json.dumps({
@@ -476,15 +478,23 @@ def main():
             "max_rounds": args.max_rounds,
             "with_memory": args.with_memory,
         }, ensure_ascii=False, sort_keys=True)
-        cache_key = hashlib.sha256(cache_key_src.encode("utf-8")).hexdigest()[:16]
+        # 16→32 hex (128bit) 로 확장. 운영자 reports of cross-topic cache hit (V25 vs COIN-LIO)
+        # 후 16-char (64bit) 충돌 가능성 배제용. 2026-05-28.
+        cache_key = hashlib.sha256(cache_key_src.encode("utf-8")).hexdigest()[:32]
         cache_path = CACHE_DIR / f"{cache_key}.json"
         if cache_path.is_file() and (time.time() - cache_path.stat().st_mtime) < CACHE_TTL_SEC:
             try:
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
                 age_min = int((time.time() - cache_path.stat().st_mtime) / 60)
-                print(f"=== ai-debate CACHE HIT (age {age_min}min, ttl {CACHE_TTL_SEC//3600}h) ===")
+                cached_task_preview = (cached.get("task_preview") or "(no-task-stored)").replace("\n", " ")[:240]
+                current_task_preview = task.replace("\n", " ")[:240]
+                print(f"=== ai-debate CACHE HIT (age {age_min}min, ttl {CACHE_TTL_SEC//3600}h, key {cache_key[:16]}) ===")
                 print(f"original run: {cached.get('run_id','?')}")
-                print(f"--no-cache 로 강제 재토론 가능.")
+                print(f"cached task : {cached_task_preview}")
+                print(f"current task: {current_task_preview}")
+                if cached.get("task_sha256") and cached["task_sha256"] != hashlib.sha256(task.encode("utf-8")).hexdigest():
+                    print("[ai-debate] WARNING: task SHA mismatch — cache poisoning 의심. --no-cache 로 재토론 권장.", file=sys.stderr)
+                print("--no-cache 로 강제 재토론 가능.")
                 print()
                 print(cached.get("summary_text", "(empty)"))
                 return
@@ -683,10 +693,14 @@ def main():
     # cache 기록 (--no-cache 또는 --seed 명시 시 skip)
     if not args.no_cache and args.seed is None:
         try:
+            import hashlib as _h
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps({
                 "run_id": run_id,
                 "summary_text": "\n".join(summary_lines),
+                # 진단용: task 원문 hash 와 preview 보존 (cross-topic cache hit 디버깅).
+                "task_sha256": _h.sha256(task.encode("utf-8")).hexdigest(),
+                "task_preview": task[:480],
             }, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
