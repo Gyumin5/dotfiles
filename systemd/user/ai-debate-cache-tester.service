@@ -1,0 +1,7 @@
+[Unit]
+Description=ai-debate cache integrity tester (one-shot)
+
+[Service]
+Type=oneshot
+ExecStart=/home/gmoh/dotfiles/bin/ai-debate-cache-tester
+Nice=10

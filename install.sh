@@ -183,6 +183,27 @@ if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
   echo "  Add this to your shell rc file: export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
+# systemd user units 복사 (없으면) + daemon-reload.
+# 활성화는 사용자가 SETUP.md 따라 수동으로 — 자동 enable 은 의존 토큰/.env 필요.
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+if [ -d "$DOTFILES_DIR/systemd/user" ]; then
+  mkdir -p "$SYSTEMD_USER_DIR"
+  copied=0
+  for f in "$DOTFILES_DIR"/systemd/user/*.service "$DOTFILES_DIR"/systemd/user/*.timer; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f")
+    if [ ! -f "$SYSTEMD_USER_DIR/$name" ]; then
+      cp "$f" "$SYSTEMD_USER_DIR/$name"
+      copied=$((copied + 1))
+    fi
+  done
+  if [ "$copied" -gt 0 ]; then
+    echo "Copied $copied systemd unit(s) to $SYSTEMD_USER_DIR"
+    systemctl --user daemon-reload 2>/dev/null || true
+  fi
+  echo "NOTE: enable units per SETUP.md after creating .claude/telegram/.env and ~/.claude/control-bot/.env"
+fi
+
 echo ""
 echo "Dotfiles installed successfully!"
 echo "  ~/.claude/CLAUDE.md -> $DOTFILES_DIR/claude/CLAUDE.md"

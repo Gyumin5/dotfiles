@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ai-debate-cache-tester every 10 minutes (capped to 12 runs)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+AccuracySec=15s
+Unit=ai-debate-cache-tester.service
+
+[Install]
+WantedBy=timers.target
