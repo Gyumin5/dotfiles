@@ -1,5 +1,6 @@
 {
   "respectGitignore": true,
+  "model": "claude-opus-4-8",
   "env": {
     "ENABLE_PROMPT_CACHING_1H": "1"
   },
@@ -274,7 +275,7 @@
       }
     }
   },
-  "effortLevel": "medium",
+  "effortLevel": "high",
   "autoCompactWindow": 500000,
   "awaySummaryEnabled": true,
   "theme": "dark"
