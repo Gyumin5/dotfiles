@@ -102,6 +102,7 @@ Bash timeout 600000ms. 응답 없이 진행 금지. 실패 시 해당 PID만 kil
 - 오래 걸릴 수 있는 bash 명령(빌드, 학습, 실험 스크립트, 큰 테스트, 다운로드, 원격 동기화 등)은 항상 `run_in_background=true`로 실행. 포그라운드 block 금지 — 텔레그램 응답 중단 → 세션 stuck 원인. 확실치 않으면 백그라운드 우선. 짧은 명령(<30s)만 foreground.
 - /loop 자율루프(autonomous-loop-dynamic 포함) 안에서는 위 규칙 더 엄격: tick 한 번에 단일 tool 호출이 30s 넘을 가능성 있으면 무조건 `run_in_background=true`. 결과는 같은 tick에서 기다리지 말고 다음 tick에서 `cat <task-output>` 또는 TaskOutput으로 폴링. foreground로 분 단위 점유 시 사용자 텔레그램 메시지가 그 turn 끝날 때까지 묶임 (2026-05-11 intensitylio 1.5h hang 사고).
 - 완료·통과·정상 선언 전에 해당 검증 명령(테스트/빌드/lint/재현) 실행하고 출력 확인. 출력 없이 "동작할 것 같다"로 선언 금지.
+- 진단/스크립트에서 claude CLI 자식 세션 생성 금지 — MCP long-poll(telegram getUpdates) 점유로 부모 세션 MCP 끊김. 진단은 jsonl/systemctl 직접 조회. 자식 claude 가 꼭 필요하면 `--strict-mcp-config --mcp-config <empty.json> -p "..."` 강제. `claude --version` 은 자식 안 띄워서 OK. (2026-05-29 dotfiles MCP 끊김 사고)
 
 ## 큰 입력 방어 (Prompt too long 예방)
 
