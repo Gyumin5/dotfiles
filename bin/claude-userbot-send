@@ -52,6 +52,9 @@ def resolve_target(raw, use_session):
 
 
 def coerce_entity(target):
+    # 'me'/'self' = 내 Saved Messages (telethon 특수값)
+    if target.lower() in ("me", "self"):
+        return "me"
     # 숫자면 int chat_id, 아니면 @username 문자열 그대로
     t = target.lstrip("@")
     if t.lstrip("-").isdigit():
