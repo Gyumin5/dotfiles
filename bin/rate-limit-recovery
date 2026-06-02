@@ -82,30 +82,9 @@ if [ "$TRUE_RESET" = true ]; then
     done
 fi
 
-# 큐 자동 재개 trigger 발송. 성공 0, 실패 1.
-# 1) 로컬 유저봇 (home) → claude-userbot-send 직접.
-# 2) 유저봇 없는 PC (raion) → relay.conf 의 USERBOT_HOST 로 home 에 ssh 위임.
-trigger_flush() {
-    local proj="$1"
-    if [ -x "$USERBOT_SEND" ] && [ -f "$USERBOT_SESSION" ]; then
-        "$USERBOT_SEND" --session "$proj" "trigger:queue-flush" >/dev/null 2>&1 && return 0
-        return 1
-    fi
-    if [ -f "$RELAY_CONF" ]; then
-        # shellcheck disable=SC1090
-        . "$RELAY_CONF"
-        if [ -n "${USERBOT_HOST:-}" ]; then
-            ssh -o BatchMode=yes -o ConnectTimeout=8 "$USERBOT_HOST" \
-                "claude-userbot-send --session '${proj}' 'trigger:queue-flush'" >/dev/null 2>&1 && return 0
-        fi
-    fi
-    return 1
-}
-
-# 알림은 각 프로젝트 봇 채팅으로 송신 (사용자: 각 세션 알림은 그 세션 봇으로).
-send_project_alert() {
-    local proj="$1" cwd="$2" qcount="$3" triggered="${4:-false}"
-    local env_file=""
+# 프로젝트의 telegram .env 경로 해석. 없으면 fallback. stdout 으로 경로 출력.
+resolve_env_file() {
+    local proj="$1" cwd="$2" env_file=""
     if [ -n "$cwd" ] && [ -f "${cwd}/.claude/telegram/.env" ]; then
         env_file="${cwd}/.claude/telegram/.env"
     else
@@ -117,6 +96,50 @@ send_project_alert() {
         done
     fi
     [ -f "$env_file" ] || env_file="$FALLBACK_TELEGRAM_ENV"
+    echo "$env_file"
+}
+
+# 해당 봇의 @username 을 getMe 로 조회 (토큰은 이 PC 에 머물고 username 만 반환).
+resolve_bot_username() {
+    local env_file="$1"
+    [ -f "$env_file" ] || return 1
+    ( . "$env_file"
+      [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || exit 1
+      curl -s --max-time 8 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" \
+        | python3 -c 'import json,sys
+try:
+  u=json.load(sys.stdin)["result"]["username"]
+  print("@"+u)
+except: sys.exit(1)' ) 2>/dev/null
+}
+
+# 큐 자동 재개 trigger 발송. 성공 0, 실패 1.
+# 세션 이름이 아니라 그 PC 가 자기 .env 에서 알아낸 봇 @username 으로 보냄
+# → home/raion 세션 이름 충돌(둘 다 'dotfiles') 원천 차단.
+# 1) 로컬 유저봇 (home) → claude-userbot-send <@bot> 직접.
+# 2) 유저봇 없는 PC (raion) → relay.conf USERBOT_HOST 로 home 유저봇에 ssh 위임.
+trigger_flush() {
+    local env_file="$1" botuser=""
+    botuser=$(resolve_bot_username "$env_file")
+    [ -n "$botuser" ] || return 1
+    if [ -x "$USERBOT_SEND" ] && [ -f "$USERBOT_SESSION" ]; then
+        "$USERBOT_SEND" "$botuser" "trigger:queue-flush" >/dev/null 2>&1 && return 0
+        return 1
+    fi
+    if [ -f "$RELAY_CONF" ]; then
+        # shellcheck disable=SC1090
+        . "$RELAY_CONF"
+        if [ -n "${USERBOT_HOST:-}" ]; then
+            ssh -o BatchMode=yes -o ConnectTimeout=8 "$USERBOT_HOST" \
+                "claude-userbot-send '${botuser}' 'trigger:queue-flush'" >/dev/null 2>&1 && return 0
+        fi
+    fi
+    return 1
+}
+
+# 알림은 각 프로젝트 봇 채팅으로 송신 (사용자: 각 세션 알림은 그 세션 봇으로).
+send_project_alert() {
+    local proj="$1" env_file="$2" qcount="$3" triggered="${4:-false}"
     [ -f "$env_file" ] || return 0
     ( . "$env_file"
       if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
@@ -147,11 +170,12 @@ if [ -d "$QUEUE_DIR" ]; then
         cwd=""
         [ -f "$cwd_file" ] && cwd=$(cat "$cwd_file")
         if [ "$n" -gt 0 ]; then
+            env_file=$(resolve_env_file "$proj" "$cwd")
             TRIGGERED=false
-            if trigger_flush "$proj"; then
+            if trigger_flush "$env_file"; then
                 TRIGGERED=true
             fi
-            send_project_alert "$proj" "$cwd" "$n" "$TRIGGERED"
+            send_project_alert "$proj" "$env_file" "$n" "$TRIGGERED"
             NOTIFIED=true
         fi
     done
