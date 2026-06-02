@@ -2,6 +2,7 @@
 Description=Claude Code session for resume (telegram remote-control)
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=/home/gmoh/resume/.claude/telegram/.env
 
 [Service]
 Type=simple

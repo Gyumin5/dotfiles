@@ -1,0 +1,10 @@
+# home PC 가 enable 하는 세션 목록 (claude-<name>.service). 한 줄당 세션명.
+# 머신 식별: ~/.config/claude-machine-id 내용이 'home' 일 때 이 목록 사용.
+251229
+albert
+bias
+dotfiles
+helipr
+intensitylio
+resume
+velocity

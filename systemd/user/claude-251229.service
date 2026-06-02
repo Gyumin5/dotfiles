@@ -2,6 +2,7 @@
 Description=Claude Code session for 251229 (telegram remote-control)
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=/home/gmoh/mon/251229/.claude/telegram/.env
 
 [Service]
 Type=simple

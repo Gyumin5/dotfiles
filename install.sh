@@ -185,25 +185,61 @@ if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
   echo "  Add this to your shell rc file: export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
-# systemd user units 복사 (없으면) + daemon-reload.
-# 활성화는 사용자가 SETUP.md 따라 수동으로 — 자동 enable 은 의존 토큰/.env 필요.
+# systemd user units 배포 (git=source of truth, 항상 덮어씀) + 머신별 세션 enable.
+#
+# 머신 식별 (robust 순서):
+#   1) ~/.config/claude-machine-id  (명시적 마커 = 진실원천, rename/clone 에도 불변)
+#   2) tailscale 노드명               (마커 없을 때 기본값 제안 — 부트스트랩용)
+# 식별 못하면 unit 복사만 하고 enable 은 건너뜀 (안전).
+#
+# 세션 enable 은 machines/<machine>.list 에 적힌 것만. 추가 가드: 그 세션 토큰
+# (.claude/telegram/.env)이 이 머신에 실제 있을 때만 enable → 잘못된 머신에서
+# 같은 봇 2중 inbound 사고 방지. (unit 자체에도 ConditionPathExists 로 2중 방어.)
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 if [ -d "$DOTFILES_DIR/systemd/user" ]; then
   mkdir -p "$SYSTEMD_USER_DIR"
-  copied=0
   for f in "$DOTFILES_DIR"/systemd/user/*.service "$DOTFILES_DIR"/systemd/user/*.timer; do
     [ -f "$f" ] || continue
-    name=$(basename "$f")
-    if [ ! -f "$SYSTEMD_USER_DIR/$name" ]; then
-      cp "$f" "$SYSTEMD_USER_DIR/$name"
-      copied=$((copied + 1))
-    fi
+    cp -f "$f" "$SYSTEMD_USER_DIR/$(basename "$f")"
   done
-  if [ "$copied" -gt 0 ]; then
-    echo "Copied $copied systemd unit(s) to $SYSTEMD_USER_DIR"
-    systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user daemon-reload 2>/dev/null || true
+  echo "Synced systemd units to $SYSTEMD_USER_DIR"
+
+  # 머신 식별
+  MACHINE_ID=""
+  MARKER="$HOME/.config/claude-machine-id"
+  if [ -f "$MARKER" ]; then
+    MACHINE_ID=$(tr -d '[:space:]' < "$MARKER")
+  elif command -v tailscale >/dev/null 2>&1; then
+    TS_NAME=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["Self"]["HostName"])
+except: pass' 2>/dev/null)
+    if [ -n "$TS_NAME" ] && [ -f "$DOTFILES_DIR/machines/${TS_NAME}.list" ]; then
+      MACHINE_ID="$TS_NAME"
+      echo "machine-id 마커 없음 → tailscale 노드명 '$TS_NAME' 사용. 고정하려면: echo $TS_NAME > $MARKER"
+    fi
   fi
-  echo "NOTE: enable units per SETUP.md after creating .claude/telegram/.env and ~/.claude/control-bot/.env"
+
+  MANIFEST="$DOTFILES_DIR/machines/${MACHINE_ID}.list"
+  if [ -n "$MACHINE_ID" ] && [ -f "$MANIFEST" ]; then
+    echo "Machine='$MACHINE_ID' — enabling sessions from machines/${MACHINE_ID}.list"
+    while read -r s; do
+      case "$s" in ''|\#*) continue;; esac
+      unit="claude-${s}.service"
+      [ -f "$SYSTEMD_USER_DIR/$unit" ] || { echo "  skip $s (no unit)"; continue; }
+      wd=$(sed -n 's/^WorkingDirectory=//p' "$SYSTEMD_USER_DIR/$unit" | head -1)
+      if [ -n "$wd" ] && [ -f "$wd/.claude/telegram/.env" ]; then
+        systemctl --user enable --now "$unit" 2>/dev/null \
+          && echo "  enabled $unit" || echo "  WARN enable failed: $unit"
+      else
+        echo "  skip $s (token .env 없음: ${wd}/.claude/telegram/.env) — 이 머신 세션 아님"
+      fi
+    done < "$MANIFEST"
+    loginctl enable-linger "$USER" 2>/dev/null || true
+  else
+    echo "NOTE: machine-id 미식별. 'echo home > $MARKER' (또는 raion) 후 재실행하면 그 머신 세션 자동 enable."
+    echo "      또는 SETUP.md 따라 수동 enable. 토큰 .env / control-bot/.env 선행 필요."
+  fi
 fi
 
 echo ""

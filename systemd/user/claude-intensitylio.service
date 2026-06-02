@@ -2,6 +2,7 @@
 Description=Claude Code session for intensitylio (telegram remote-control)
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=/home/gmoh/av-ros/test/intensitylio/.claude/telegram/.env
 
 [Service]
 Type=simple

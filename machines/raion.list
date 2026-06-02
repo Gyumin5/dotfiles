@@ -1,0 +1,5 @@
+# raion PC 가 enable 하는 세션 목록.
+# 머신 식별: ~/.config/claude-machine-id 내용이 'raion' 일 때 이 목록 사용.
+# 주의: dotfiles 세션은 home/raion 둘 다 있지만 봇 토큰(.env)이 머신별로 달라 충돌 없음.
+dotfiles
+raion
