@@ -415,10 +415,21 @@ def session_health(name):
     if not active:
         return False, False
     bun_alive = False
-    cgroup_paths = [
+    cg = ""
+    try:
+        cg = subprocess.check_output(
+            ["systemctl", "--user", "show", "-p", "ControlGroup", "--value", unit],
+            text=True, timeout=3,
+        ).strip()
+    except Exception:
+        cg = ""
+    cgroup_paths = []
+    if cg:
+        cgroup_paths.append(f"/sys/fs/cgroup{cg}/cgroup.procs")
+    cgroup_paths.extend([
         f"/sys/fs/cgroup/systemd/user.slice/user-1000.slice/user@1000.service/{unit}/cgroup.procs",
         f"/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/{unit}/cgroup.procs",
-    ]
+    ])
     for cp in cgroup_paths:
         try:
             with open(cp) as f:
