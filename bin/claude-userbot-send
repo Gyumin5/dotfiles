@@ -67,6 +67,8 @@ def main():
     ap.add_argument("target", help="@봇유저네임 / chat_id / (--session 일 때) 세션이름")
     ap.add_argument("message", nargs="+", help="보낼 메시지 (공백 포함 가능)")
     ap.add_argument("--session", action="store_true", help="target 을 targets.json 세션이름으로 해석")
+    ap.add_argument("--delete-after", type=float, default=0, metavar="SEC",
+                    help="발송 N초 뒤 메시지 삭제 (대상 세션 getUpdates 가 받은 뒤 채팅 정리용). trigger 노이즈 제거.")
     args = ap.parse_args()
 
     text = " ".join(args.message)
@@ -87,6 +89,7 @@ def main():
         print("[send] userbot.session 없음. claude-userbot-login 먼저 실행.", file=sys.stderr)
         sys.exit(2)
 
+    import time as _time
     from telethon.sync import TelegramClient
 
     with TelegramClient(SESSION_PATH, api_id, api_hash) as client:
@@ -94,11 +97,21 @@ def main():
             print("[send] 미인증 세션. claude-userbot-login 재실행.", file=sys.stderr)
             sys.exit(2)
         try:
-            client.send_message(entity, text)
+            sent = client.send_message(entity, text)
         except Exception as e:
             print(f"[send] 발송 실패 ({entity}): {e}", file=sys.stderr)
             sys.exit(3)
-    print(f"[send] OK → {entity} ({len(text)} chars)")
+        deleted = False
+        if args.delete_after and args.delete_after > 0:
+            # 대상 세션 getUpdates 가 메시지를 받은 뒤 삭제 → wake 는 유지, 채팅엔 안 남음.
+            _time.sleep(args.delete_after)
+            try:
+                client.delete_messages(entity, [sent.id], revoke=True)
+                deleted = True
+            except Exception as e:
+                print(f"[send] 삭제 실패 (무해): {e}", file=sys.stderr)
+    suffix = f", deleted after {args.delete_after}s" if deleted else ""
+    print(f"[send] OK → {entity} ({len(text)} chars{suffix})")
 
 
 if __name__ == "__main__":
