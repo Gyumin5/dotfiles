@@ -16,6 +16,11 @@ CACHE=~/.claude/statusline_cache.json
 QUEUE_DIR=~/.claude/state/rate-limit-queue
 STATE_FLAG=~/.claude/state/rate-limit-blocked.flag
 FALLBACK_TELEGRAM_ENV=~/dotfiles/.claude/telegram/.env
+# userbot 자동 재개: 큐 있는 세션 봇에 trigger:queue-flush 발송 → prompt-guard 가 큐 처리.
+USERBOT_SEND="$HOME/.local/bin/claude-userbot-send"
+USERBOT_SESSION="$HOME/.claude/userbot/userbot.session"
+# raion 처럼 유저봇이 없는 PC 는 relay.conf 의 USERBOT_HOST 로 home 에 ssh 위임.
+RELAY_CONF="$HOME/.claude/userbot/relay.conf"
 
 [ -f "$CACHE" ] || exit 0
 
@@ -77,9 +82,29 @@ if [ "$TRUE_RESET" = true ]; then
     done
 fi
 
+# 큐 자동 재개 trigger 발송. 성공 0, 실패 1.
+# 1) 로컬 유저봇 (home) → claude-userbot-send 직접.
+# 2) 유저봇 없는 PC (raion) → relay.conf 의 USERBOT_HOST 로 home 에 ssh 위임.
+trigger_flush() {
+    local proj="$1"
+    if [ -x "$USERBOT_SEND" ] && [ -f "$USERBOT_SESSION" ]; then
+        "$USERBOT_SEND" --session "$proj" "trigger:queue-flush" >/dev/null 2>&1 && return 0
+        return 1
+    fi
+    if [ -f "$RELAY_CONF" ]; then
+        # shellcheck disable=SC1090
+        . "$RELAY_CONF"
+        if [ -n "${USERBOT_HOST:-}" ]; then
+            ssh -o BatchMode=yes -o ConnectTimeout=8 "$USERBOT_HOST" \
+                "claude-userbot-send --session '${proj}' 'trigger:queue-flush'" >/dev/null 2>&1 && return 0
+        fi
+    fi
+    return 1
+}
+
 # 알림은 각 프로젝트 봇 채팅으로 송신 (사용자: 각 세션 알림은 그 세션 봇으로).
 send_project_alert() {
-    local proj="$1" cwd="$2" qcount="$3"
+    local proj="$1" cwd="$2" qcount="$3" triggered="${4:-false}"
     local env_file=""
     if [ -n "$cwd" ] && [ -f "${cwd}/.claude/telegram/.env" ]; then
         env_file="${cwd}/.claude/telegram/.env"
@@ -97,7 +122,9 @@ send_project_alert() {
       if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
           local bypass_note=""
           [ -n "$CLEARED_BYPASS" ] && bypass_note=" (bypass flag 자동 해제: ${CLEARED_BYPASS})"
-          if [ "$qcount" -gt 0 ]; then
+          if [ "$qcount" -gt 0 ] && [ "$triggered" = true ]; then
+              msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 ${qcount}개 자동 재개 중 (유저봇 trigger 발송)."
+          elif [ "$qcount" -gt 0 ]; then
               msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 ${qcount}개 대기. 아무 메시지나 보내면 자동 처리됨."
           else
               msg="rate-limit 해제 (5h ${PCT_5H}%, 7d ${PCT_7D}%)${bypass_note}. 큐 비어있음."
@@ -120,7 +147,11 @@ if [ -d "$QUEUE_DIR" ]; then
         cwd=""
         [ -f "$cwd_file" ] && cwd=$(cat "$cwd_file")
         if [ "$n" -gt 0 ]; then
-            send_project_alert "$proj" "$cwd" "$n"
+            TRIGGERED=false
+            if trigger_flush "$proj"; then
+                TRIGGERED=true
+            fi
+            send_project_alert "$proj" "$cwd" "$n" "$TRIGGERED"
             NOTIFIED=true
         fi
     done
@@ -139,14 +170,9 @@ if [ "$NOTIFIED" = false ] && [ -f "$CONTROL_BOT_ENV" ]; then
     fi
 fi
 
-# TODO: userbot 도입 후 — 큐 있으면 userbot으로 "trigger:queue-flush" 메시지 자동 전송.
-# 현재는 사용자 다음 메시지가 트리거 역할.
-# 예시 (userbot 도입 시):
-#   if [ "$TOTAL_QUEUED" -gt 0 ]; then
-#       for f in "$QUEUE_DIR"/*.jsonl; do
-#           proj=$(basename "$f" .jsonl)
-#           ~/.local/share/userbot/.venv/bin/python ~/.local/share/userbot/send_trigger.py "$proj"
-#       done
-#   fi
+# userbot 자동 재개는 위 큐 루프의 trigger_flush() 로 처리됨 (2026-06-02).
+# - home: claude-userbot-send --session <proj> "trigger:queue-flush" 직접.
+# - raion: relay.conf USERBOT_HOST 로 home 에 ssh 위임.
+# trigger 실패 시(유저봇 미설치/세션 만료) 기존 폴백 — 사용자 다음 메시지가 트리거.
 
 exit 0

@@ -155,7 +155,9 @@ fi
 #   - TTL 6시간: 그보다 오래된 항목은 STALE 태그(자동 실행 금지, 사용자 확인 요청)
 #   - batch limit 20: 한 번에 20개만 flush, 초과분은 큐에 잔존
 #   - dedup id: 동일 id 중복 제거
+FLUSHED=false
 if [ -s "$QUEUE_FILE" ]; then
+    FLUSHED=true
     FLUSH_DIR=$(mktemp -d)
     trap 'rm -rf "$FLUSH_DIR"' EXIT
     python3 - "$QUEUE_FILE" "$FLUSH_DIR" <<'PYEOF' 2>/dev/null
@@ -252,6 +254,12 @@ EOF
         > "$QUEUE_FILE"
     fi
     rm -f "${ALERT_FLAG_PREFIX}-${PROJ}.flag"
+fi
+
+# userbot trigger 인데 flush 할 큐가 없었으면 (이미 처리됨/레이스) 모델 노출 없이 조용히 차단.
+if [ "$USER_PROMPT" = "trigger:queue-flush" ] && [ "$FLUSHED" != true ]; then
+    echo "rate-limit-guard: 빈 큐 trigger 무시" >&2
+    exit 2
 fi
 
 exit 0
