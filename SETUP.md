@@ -56,10 +56,12 @@ npm i -g @openai/codex
 
 ### 텔레그램 봇
 
-9개 세션마다 별도 봇 토큰 필요. BotFather → 새 봇 9개 + 컨트롤봇 1개.
-- 각 세션 디렉토리에 `.claude/telegram/.env` 만들고 `TELEGRAM_BOT_TOKEN=...` 한 줄.
-- 컨트롤봇 토큰은 `~/.claude/control-bot/.env` 에 같은 형식.
+세션마다 별도 봇 토큰 필요 (머신별로 세션 수 다름 — `machines/<machine>.list` 참고).
+BotFather → 세션 수만큼 봇 + 머신별 컨트롤봇 1개.
+- 각 세션 디렉토리에 `.claude/telegram/.env` 만들고 `TELEGRAM_BOT_TOKEN=...` 한 줄. (gitignore, 머신 로컬)
+- 컨트롤봇 토큰은 `~/.claude/control-bot/.env` 에 `CONTROL_BOT_TOKEN=` + `ALLOWED_USER_ID=`.
 - chat_id 는 운영자 8689118207 고정 (코드 다수 곳에 하드코딩).
+- 같은 봇 토큰을 두 머신/세션이 공유하면 inbound 가 한쪽만 수신됨 (getUpdates 단일 소비자). 머신·세션마다 다른 봇 토큰 사용.
 
 ---
 
@@ -74,24 +76,33 @@ cd ~/dotfiles
 `install.sh` 가 처리하는 것:
 - `~/.claude/settings.json` symlink → `dotfiles/claude/settings.json`
 - `~/.claude/hooks/` symlink → `dotfiles/claude/hooks/`
-- `~/.local/bin/PATH` 추가 + `bin/*` symlink
+- `~/.local/bin/PATH` 추가 + `bin/*` symlink (claude-userbot-* 포함)
+- systemd unit 전체 동기화 (`cp -f` 덮어씀, git=source of truth) + `daemon-reload`
+- 머신 식별 (아래) 후 `machines/<machine>.list` 의 세션만 `enable --now` (토큰 .env 있는 것만)
 
-별도 수동 단계 (install.sh 가 아직 안 함):
-- systemd unit 복사: `cp dotfiles/systemd/user/*.service dotfiles/systemd/user/*.timer ~/.config/systemd/user/`
-- `systemctl --user daemon-reload`
-- 필요한 타이머 활성화 (아래 4번).
+설치 전 선행 (머신 식별):
+- `echo home > ~/.config/claude-machine-id` (또는 `raion` 등). 이 마커가 어떤 세션을 enable 할지 결정하는 진실원천.
+- 마커 없으면 install 이 tailscale 노드명으로 기본값 시도. 그래도 못 정하면 unit 복사만 하고 enable 은 skip.
+- 머신 식별로 hostname/`/etc/machine-id` 안 씀 (rename·clone 시 충돌). 마커 파일이 진실원천.
 
 ---
 
 ## 4. systemd 활성화
 
-운영자 9개 세션 (Restart=always 로 두면 cl 종료해도 자동 부활):
+세션 enable 은 `install.sh` 가 머신 마커 + `machines/<machine>.list` 로 자동 처리한다
+(Restart=always 라 cl 종료해도 자동 부활). 수동으로 하려면:
 
 ```bash
-for s in 251229 albert bias dotfiles helipr intensitylio new-loc resume velocity; do
-    systemctl --user enable --now claude-$s.service
-done
+# 마커 머신의 매니페스트에 적힌 세션만 (토큰 .env 있는 것만 — ConditionPathExists 2중 가드)
+while read -r s; do
+  case "$s" in ''|\#*) continue;; esac
+  systemctl --user enable --now "claude-$s.service"
+done < machines/$(cat ~/.config/claude-machine-id).list
 ```
+
+- 머신별 세션 목록은 `machines/home.list`, `machines/raion.list` 에 선언. 3대째는 `machines/<name>.list` 추가.
+- 각 세션 unit 에 `ConditionPathExists=<wd>/.claude/telegram/.env` — 토큰 없는 머신에선 start 가 실패 아니라 스킵 (같은 봇 2중 inbound 방지).
+- 잘못된 머신에서 enable 돼도 토큰 없으면 무해하게 스킵.
 
 가드 / 타이머:
 
@@ -107,6 +118,44 @@ systemctl --user enable --now claude-bun-ensure.timer
 # 컨트롤봇
 systemctl --user enable --now claude-control-bot.service
 ```
+
+---
+
+## 4b. 유저봇 (텔레그램 user-mode) — 크로스세션 주입 + rate-limit 자동재개
+
+내 텔레그램 계정으로 임의 봇 채팅에 메시지를 발사하는 발신기 (Telethon/MTProto).
+용도: (a) 어느 세션에든 프롬프트 수동 주입, (b) rate-limit 해제 시 큐 자동 flush.
+
+발신기는 한 머신(home)에만 둔다. 다른 머신(raion)은 ssh 로 home 발신기에 위임.
+
+home 세팅 (1회):
+```bash
+pip install --user telethon                       # python3.8 호환 1.43.x
+mkdir -p ~/.claude/userbot && chmod 700 ~/.claude/userbot
+# .env 작성 (채팅 금지, 터미널에서 직접). my.telegram.org 발급 값:
+#   API_ID=...
+#   API_HASH=...
+chmod 600 ~/.claude/userbot/.env
+claude-userbot-login                               # 전화+SMS 인증 → userbot.session 생성 (인터랙티브)
+# 세션→봇 매핑 (수동 --session 주입용). 봇 @username 은 다음으로 조회 가능:
+#   python -c "from telethon.sync import TelegramClient; ..."  또는 targets.json.example 참고
+cp ~/.claude/userbot/targets.json.example ~/.claude/userbot/targets.json && nano ~/.claude/userbot/targets.json
+```
+
+비-home 머신 (raion) 세팅 — 발신기 없이 home 에 위임:
+```bash
+# tailscale SSH 로 raion↔home 무인 ssh 먼저 (양쪽): sudo tailscale set --ssh
+#   + admin ACL 의 ssh action 을 check → accept (무인 재인증 불가 방지)
+printf 'USERBOT_HOST=gmoh@home\n' > ~/.claude/userbot/relay.conf && chmod 600 ~/.claude/userbot/relay.conf
+```
+
+동작 / 사용:
+- 수동 주입: `claude-userbot-send --session <세션이름> "메시지"` (targets.json 매핑) 또는 `claude-userbot-send @봇 "메시지"`.
+- 자동재개: `rate-limit-recovery` 가 해제 감지 시 큐 있는 세션 봇에 `trigger:queue-flush` 발송.
+  - home 세션: 로컬 유저봇이 직접 발송.
+  - 비-home 세션: `relay.conf` 의 `USERBOT_HOST` 로 home 에 ssh 위임 (그 PC 가 자기 .env 로 봇 @username 해석 → home 유저봇이 발송).
+  - trigger 는 대상 세션이 **idle** 일 때만 hook 으로 flush 됨 (rate-limit 걸린 세션은 idle 이라 정상). busy 세션엔 turn-중간 주입돼 hook 미발동 → 다음 사용자 메시지가 flush.
+- 자격증명(`.env`, `userbot.session`)·`relay.conf` 는 전부 git 밖, chmod 600, 머신 로컬. 절대 commit/채팅 금지.
 
 ---
 
@@ -174,6 +223,9 @@ BYPASS_SECRETS_SCAN=1 git commit ...                     # secrets 스캔 우회
 - Telegram MCP plugin disconnect 가 간헐 발생 — 근본 원인 미진단. cs restart 로 복구.
 - ai-debate cache 키 32-char (128bit) SHA256. task_preview + task_sha256 진단 저장.
   cross-topic cache hit 의심 시 stderr WARNING 노출.
+- 유저봇 자동재개 trigger 는 대상 세션이 idle 일 때만 hook flush. busy 세션은 turn-중간 주입돼
+  hook 미발동 (같은 세션에서 자기 자신 테스트하면 항상 busy → flush 안 되는 함정). 검증은 별도 idle 세션으로.
+- 텔레그램 inbound 는 봇 채팅당 한 세션만 수신 (getUpdates 단일 소비자). 토큰 공유 금지.
 
 ---
 
