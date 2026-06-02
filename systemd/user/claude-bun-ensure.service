@@ -1,6 +1,6 @@
 [Unit]
 Description=Claude Code 부팅 후 bun (telegram MCP) 누락 세션 자동 복구
-After=network-online.target default.target
+After=network-online.target
 Wants=network-online.target
 
 [Service]

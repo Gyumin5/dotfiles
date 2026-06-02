@@ -1,6 +1,5 @@
 [Unit]
 Description=Watch claude session jsonls for API 5xx errors and alert via telegram
-After=default.target
 
 [Service]
 Type=oneshot
