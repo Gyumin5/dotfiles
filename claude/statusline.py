@@ -120,9 +120,9 @@ def main():
     rl5 = rls.get("five_hour", {}).get("used_percentage")
     rl7 = rls.get("seven_day", {}).get("used_percentage")
     if rl5 is not None and rl7 is not None:
-        parts.append(f"rl:{rl5}%/7d:{rl7}%")
+        parts.append(f"rl:{int(round(rl5))}%/7d:{int(round(rl7))}%")
     elif rl5 is not None:
-        parts.append(f"rl:{rl5}%")
+        parts.append(f"rl:{int(round(rl5))}%")
 
     # Directory basename
     cwd = data.get("cwd", "")
