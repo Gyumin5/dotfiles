@@ -47,6 +47,11 @@ fi
 [ -z "$PROJ" ] && PROJ=$(basename "$CWD")
 QUEUE_FILE="$QUEUE_DIR/${PROJ}.jsonl"
 
+# trigger 판정: 텔레그램 메시지는 prompt 가 <channel ...>trigger:queue-flush</channel>
+# 형태로 감싸져 오므로 == 가 아니라 "포함(contains)" 으로 본다.
+IS_TRIGGER=false
+case "$USER_PROMPT" in *trigger:queue-flush*) IS_TRIGGER=true ;; esac
+
 # 보조 서비스(progress-updater 등)는 큐잉/차단 대상 아님. 사용자 세션이 아니므로 통과.
 case "$PROJ" in
     progress-updater|rate-limit-recovery|daily-research|control-bot|watchdog|"")
@@ -104,7 +109,7 @@ if [ "$PCT_7D" -ge "$THRESHOLD_7D" ] 2>/dev/null; then BLOCKED=true; fi
 # 3. 차단 상태: 큐에 저장하고 prompt 차단
 if [ "$BLOCKED" = true ]; then
     # trigger 메시지면 그냥 묵살 (큐 처리는 차단 풀린 다음 분기에서)
-    if [ "$USER_PROMPT" = "trigger:queue-flush" ]; then
+    if [ "$IS_TRIGGER" = true ]; then
         echo "rate-limit-guard: trigger 무시 (아직 차단 중)" >&2
         exit 2
     fi
@@ -225,7 +230,7 @@ ${STALE_CONTENT}"
     fi
 
     # trigger 메시지면 noise 없이 큐만 처리 — 사용자에게 trigger 자체는 안 보이게
-    if [ "$USER_PROMPT" = "trigger:queue-flush" ]; then
+    if [ "$IS_TRIGGER" = true ]; then
         cat <<EOF
 [rate-limit 해제 — fresh ${QUEUE_LEN}개 flush, stale ${STALE_LEN}개, 잔여 ${REMAINDER_LEN}개]
 
@@ -257,7 +262,7 @@ EOF
 fi
 
 # userbot trigger 인데 flush 할 큐가 없었으면 (이미 처리됨/레이스) 모델 노출 없이 조용히 차단.
-if [ "$USER_PROMPT" = "trigger:queue-flush" ] && [ "$FLUSHED" != true ]; then
+if [ "$IS_TRIGGER" = true ] && [ "$FLUSHED" != true ]; then
     echo "rate-limit-guard: 빈 큐 trigger 무시" >&2
     exit 2
 fi
