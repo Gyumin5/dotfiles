@@ -13,7 +13,7 @@ Environment="TERM=xterm-256color"
 ExecStart=/home/gmoh/.local/bin/claude-service-exec
 ExecStartPost=/home/gmoh/.local/bin/claude-service-notify start claude-bias
 ExecStopPost=/home/gmoh/.local/bin/claude-service-notify stop claude-bias
-Restart=on-failure
+Restart=always
 RestartSec=5
 StandardOutput=append:/home/gmoh/.claude/logs/claude-bias.log
 StandardError=append:/home/gmoh/.claude/logs/claude-bias.log
