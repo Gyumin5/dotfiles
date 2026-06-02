@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """ai-debate: 멀티 AI 합의 토론 오케스트레이터 (단일 진입점).
 
-각 라운드마다 codex와 gemini를 각각 두 번 호출 — 한 번은 debater(의견),
-한 번은 critic(비판). 같은 task에 다른 역할 프롬프트로 독립 호출.
-gemini 다 죽어도 codex 2개로 debater+critic 확보됨.
+풀 = [codex, gemini, claude]. 각 라운드마다 풀의 각 agent 를 역할 수만큼 호출 —
+기본 역할은 debater(의견) + critic(비판). 같은 task에 다른 역할 프롬프트로 독립 호출.
+claude 는 격리 HOME(/home/gmoh/.claude-iso)으로 호출해 부모 세션 MCP/.claude.json 충돌 회피.
+일부 provider 가 죽어도 나머지로 debater+critic 확보됨.
 
 JSON 표준화 출력. 라운드 간에 이전 출력 전체를 다음 라운드 컨텍스트로 전달.
 critic 둘 다 should_proceed=true이고 debater 둘이 position 수렴하면 합의 종료.
-합의 안 되면 max_rounds(기본 3)까지 반복. 마지막에 codex arbiter가 final 결정 통일 정리.
+합의 안 되면 max_rounds(기본 2, --deep 시 5)까지 반복. 마지막에 codex arbiter가 final 결정 통일 정리.
+성공 콜 / 예정 콜 < 2/3 이면 arbiter 건너뛰고 실패 종료.
 
 사용:
-  ai-debate "task"
+  ai-debate "task"                          # 기본 2라운드
   cat big.md | ai-debate "이거 검토"
-  ai-debate --max-rounds 2 --seed 7 "task"
+  ai-debate --deep "task"                   # 5라운드
+  ai-debate --auto-roles --max-roles 4 "task"   # planner 가 역할 자동선정
+  ai-debate --dry-run --auto-roles "task"   # 예상 콜수만
 
 산출물: ~/.claude/state/ai-debate/run-<ts>/
 - meta.json, task.txt
@@ -444,8 +448,8 @@ def select_roles(task, args, run_dir):
 def main():
     ap = argparse.ArgumentParser(description="ai-debate: 멀티 AI 합의 토론")
     ap.add_argument("task", help="토론할 task")
-    ap.add_argument("--max-rounds", type=int, default=1, help="기본 1라운드 (토큰 절약). --deep 시 3.")
-    ap.add_argument("--deep", action="store_true", help="고비용 모드: 3라운드 합의 시도. 명시 옵션 전용.")
+    ap.add_argument("--max-rounds", type=int, default=2, help="기본 2라운드. --deep 시 5.")
+    ap.add_argument("--deep", action="store_true", help="고비용 모드: 5라운드 합의 시도. 명시 옵션 전용.")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--with-memory", action="store_true", help="프로젝트 메모리 주입 (기본: off)")
     ap.add_argument("--no-cache", action="store_true", help="24h 캐시 무시하고 새로 토론")
@@ -460,7 +464,9 @@ def main():
                     help="planner+선택역할+예상콜수만 출력, 실제 에이전트 호출 안 함")
     args = ap.parse_args()
     if args.deep:
-        args.max_rounds = max(args.max_rounds, 3)
+        args.max_rounds = max(args.max_rounds, 5)
+        # 5라운드 × 기본 2역할 × 풀 3 + arbiter = 31콜 > 기본 예산 24 → 예산도 함께 상향.
+        args.max_total_calls = max(args.max_total_calls, 40)
 
     task = args.task
     if not sys.stdin.isatty():

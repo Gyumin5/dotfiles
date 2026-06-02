@@ -9,19 +9,25 @@ effort: high
 
 ## 핵심
 - 모든 협업/토론 트리거는 ai-debate CLI 한 가지 경로로 통일.
-- 라운드마다 codex×2 + gemini×2 (각 AI가 debater + critic 두 역할 동시에) 병렬 호출.
-- gemini 다 죽어도 codex 2개로 debater+critic 확보됨.
-- JSON 표준 출력. 라운드 간 이전 출력을 컨텍스트로 전달. 합의될 때까지 반복 (max 3 라운드).
+- 풀 = [codex, gemini, claude]. 라운드마다 풀의 각 agent 를 역할 수만큼 호출 (기본 역할 debater+critic → 3 agent × 2 역할 = 6콜/라운드).
+- claude 는 격리 HOME(/home/gmoh/.claude-iso)으로 호출 → 부모 세션 telegram MCP / .claude.json 충돌 회피 (그래서 풀에 포함 가능).
+- 일부 provider(예: gemini 429, codex 장애)가 죽어도 나머지로 debater+critic 확보됨.
+- JSON 표준 출력. 라운드 간 이전 출력을 컨텍스트로 전달. 합의되면 조기 종료, 안 되면 max_rounds 까지 반복 (기본 2, --deep 시 5).
+- 합의 조건: critic 전부 should_proceed=true + debater position 수렴.
 - 최종은 codex arbiter가 final_decision/action_steps/verification_plan/dissent로 통일 정리.
+- 성공 콜 / 예정 콜 < 2/3 이면 arbiter 건너뛰고 실패 종료.
 - 산출물 ~/.claude/state/ai-debate/run-<ts>/ 저장.
 
 ## 호출 규칙
 - Bash tool로 직접 실행. 호출 직전 한 줄 사전 고지 필수 ("ai-debate 호출 중, 수 분 소요").
 - `ai-debate "task"` 또는 stdin pipe — `cat file | ai-debate "검토"`.
-- timeout 600000ms (라운드 최대 3 + arbiter = 4 phase. phase당 최대 600초).
+- timeout 600000ms. phase당 최대 600초. (기본 2라운드 + arbiter. --deep 5라운드면 더 김.)
 - 큰 컨텍스트는 stdin으로. task arg는 짧게.
 - 프로젝트 메모리는 기본 OFF. 토론 품질 보호. 필요 시 `--with-memory`.
-- max rounds 조정: `--max-rounds 2` (가벼운 케이스), 기본 3.
+- 라운드: 기본 2. 가벼우면 `--max-rounds 1`, 깊게는 `--deep`(5라운드).
+- 동적 역할: `--auto-roles` (planner LLM 이 task 보고 역할 자동선정, critic 자동추가), `--max-roles N`(기본 4).
+  명시는 `--roles debater,...`. 예산 가드 `--max-total-calls`(기본 24, 초과 시 시작 전 중단). `--dry-run` 으로 예상 콜수만.
+- 캐시: 같은 task 24h 재호출 시 캐시. 우회 `--no-cache` 또는 `--seed`.
 
 ## 출력 형식 (사용자 응답)
 - 라운드별 한 줄 요약 (debater positions / critic should_proceed 표시)
@@ -29,9 +35,9 @@ effort: high
 - 토큰 절약 위해 모든 debater/critic 원문은 dump 안 함. run_dir 경로만 안내.
 
 ## 실패 처리
-- gemini 429/parse 실패는 자연스럽게 무시 (codex 2개로 충분). 사용자 알림 불필요.
-- codex 둘 다 실패면 그 라운드 무효 → 다음 라운드 재시도.
-- arbiter 실패면 그 사실만 알리고 라운드 결과 dump.
+- gemini 429/parse 실패는 자연스럽게 무시 (codex/claude 로 충분). 사용자 알림 불필요.
+- 성공 콜 / 예정 콜 < 2/3 이면 arbiter 건너뛰고 실패 종료 (라운드 결과는 dump).
+- arbiter(codex) 실패면 그 사실만 알리고 라운드 결과 dump.
 
 ## 코드 리뷰 변형
 "AI한테 코드 리뷰" / "AI한테 리뷰 받아" 트리거:
@@ -40,5 +46,5 @@ effort: high
 
 ## 안 하는 것
 - 트리거 분리 (모든 협업 키워드는 ai-debate 단일 경로). 사용자 결정 (2026-04-29).
-- ai-debate 안에서 claude 호출 (부모 세션 telegram MCP를 disrupt). 풀은 codex+gemini만.
-- 1라운드만 돌고 종료 (합의 추구가 본질).
+- 부모 세션 claude 직접 호출 (telegram MCP disrupt). 풀의 claude 는 격리 HOME(/home/gmoh/.claude-iso) 전용.
+- arbiter 를 codex 외 다른 agent 로 (항상 codex arbiter).
