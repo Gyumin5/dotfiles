@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Telethon user-mode 메시지 발송 — 내 계정으로 임의 봇/채팅에 텍스트 전송.
+
+용도:
+  - 크로스세션 전달: 다른 세션의 프로젝트봇 채팅창에 프롬프트 주입 (그 세션이 user inbound 로 받아 자동 응답).
+  - rate-limit 자동 재개: 해제 시 큐 텍스트를 해당 세션 봇에 발송.
+
+비대화형. 사전에 claude-userbot-login 으로 userbot.session 생성돼 있어야 함.
+
+사용법:
+  claude-userbot-send <target> <message...>
+  claude-userbot-send --session <name> <message...>   # targets.json 매핑 사용
+
+  target = @봇유저네임  또는  숫자 chat_id/user_id
+  매핑   = ~/.claude/userbot/targets.json  {"세션이름": "@봇유저네임", ...}
+
+종료코드: 0 성공, 1 설정/인자 오류, 2 미인증(login 필요), 3 발송 실패.
+"""
+import argparse
+import json
+import os
+import sys
+
+USERBOT_DIR = os.path.expanduser("~/.claude/userbot")
+ENV_PATH = os.path.join(USERBOT_DIR, ".env")
+SESSION_PATH = os.path.join(USERBOT_DIR, "userbot")
+TARGETS_PATH = os.path.join(USERBOT_DIR, "targets.json")
+
+
+def load_env(path):
+    env = {}
+    if not os.path.exists(path):
+        sys.exit(f"[send] {path} 없음. API_ID/API_HASH 작성 필요.")
+    for line in open(path):
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        env[k.strip()] = v.strip()
+    return env
+
+
+def resolve_target(raw, use_session):
+    if use_session:
+        if not os.path.exists(TARGETS_PATH):
+            sys.exit(f"[send] {TARGETS_PATH} 없음. 세션→봇 매핑 필요.")
+        targets = json.load(open(TARGETS_PATH))
+        if raw not in targets:
+            sys.exit(f"[send] targets.json 에 '{raw}' 없음. 등록된: {list(targets)}")
+        return targets[raw]
+    return raw
+
+
+def coerce_entity(target):
+    # 숫자면 int chat_id, 아니면 @username 문자열 그대로
+    t = target.lstrip("@")
+    if t.lstrip("-").isdigit():
+        return int(t)
+    return target if target.startswith("@") else "@" + target
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("target", help="@봇유저네임 / chat_id / (--session 일 때) 세션이름")
+    ap.add_argument("message", nargs="+", help="보낼 메시지 (공백 포함 가능)")
+    ap.add_argument("--session", action="store_true", help="target 을 targets.json 세션이름으로 해석")
+    args = ap.parse_args()
+
+    text = " ".join(args.message)
+    target = resolve_target(args.target, args.session)
+    entity = coerce_entity(target)
+
+    env = load_env(ENV_PATH)
+    api_id = env.get("API_ID")
+    api_hash = env.get("API_HASH")
+    if not api_id or not api_hash:
+        sys.exit("[send] .env 에 API_ID / API_HASH 필요.")
+    try:
+        api_id = int(api_id)
+    except ValueError:
+        sys.exit("[send] API_ID 정수 아님.")
+
+    if not os.path.exists(f"{SESSION_PATH}.session"):
+        print("[send] userbot.session 없음. claude-userbot-login 먼저 실행.", file=sys.stderr)
+        sys.exit(2)
+
+    from telethon.sync import TelegramClient
+
+    with TelegramClient(SESSION_PATH, api_id, api_hash) as client:
+        if not client.is_user_authorized():
+            print("[send] 미인증 세션. claude-userbot-login 재실행.", file=sys.stderr)
+            sys.exit(2)
+        try:
+            client.send_message(entity, text)
+        except Exception as e:
+            print(f"[send] 발송 실패 ({entity}): {e}", file=sys.stderr)
+            sys.exit(3)
+    print(f"[send] OK → {entity} ({len(text)} chars)")
+
+
+if __name__ == "__main__":
+    main()

@@ -68,6 +68,8 @@ fi
 # Custom scripts
 ln -sf "$DOTFILES_DIR/bin/gemini-ask" ~/.local/bin/gemini-ask
 ln -sf "$DOTFILES_DIR/bin/codex-ask" ~/.local/bin/codex-ask
+ln -sf "$DOTFILES_DIR/bin/claude-userbot-login" ~/.local/bin/claude-userbot-login
+ln -sf "$DOTFILES_DIR/bin/claude-userbot-send" ~/.local/bin/claude-userbot-send
 
 # Shell aliases (add source line to bashrc if not present)
 if ! grep -q 'claude-aliases.sh' ~/.bashrc 2>/dev/null; then
