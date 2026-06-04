@@ -469,10 +469,19 @@ def main():
         args.max_total_calls = max(args.max_total_calls, 40)
 
     task = args.task
+    # stdin pipe 로 컨텍스트가 들어온 경우에만 합친다. 백그라운드 실행 시 stdin 이
+    # tty 아니면서 EOF 도 안 오는 열린 fd 면 read() 가 영구 블록 → select 로 데이터
+    # 실제 대기 중일 때만 읽는다. (2026-06-04 자동응답 런 무한 hang 사고 후 가드 추가.)
     if not sys.stdin.isatty():
-        stdin_data = sys.stdin.read().strip()
-        if stdin_data:
-            task = stdin_data + "\n\n---\n\n" + task
+        import select
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], 0.5)
+        except (ValueError, OSError):
+            ready = []
+        if ready:
+            stdin_data = sys.stdin.read().strip()
+            if stdin_data:
+                task = stdin_data + "\n\n---\n\n" + task
 
     # 24h 캐시 검사 (--no-cache 또는 --seed 명시 시 우회)
     if args.no_cache:
