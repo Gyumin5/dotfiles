@@ -70,14 +70,19 @@ def main():
     ap.add_argument("--delete-after", type=float, default=0, metavar="SEC",
                     help="발송 N초 뒤 메시지 삭제 (대상 세션 getUpdates 가 받은 뒤 채팅 정리용). trigger 노이즈 제거.")
     ap.add_argument("--notify-done", action="store_true",
-                    help="크로스세션 작업 완료 핑 요청. 메시지 앞에 마커 [[xnotify:from=<보낸세션>]] prepend. "
+                    help="크로스세션 작업 완료 핑 요청. 마커에 :notify 추가. "
                          "받은 세션 Stop 훅(completion-notify)이 완료 시 자기 봇으로 운영자 챗에 1회 알림.")
+    ap.add_argument("--no-origin", action="store_true",
+                    help="출처 마커 생략 (인프라용: trigger:queue-flush 등). 기본은 항상 출처 박음.")
     args = ap.parse_args()
 
     text = " ".join(args.message)
-    if args.notify_done:
+    # 출처 마커는 기본 항상 prepend → 받는 세션·운영자가 보낸 주체 식별 가능.
+    # :notify 가 붙은 경우에만 받는 세션 Stop 훅이 완료 핑 발송.
+    if not args.no_origin:
         origin = os.environ.get("CLAUDE_SESSION_NAME") or "?"
-        text = f"[[xnotify:from={origin}]]\n{text}"
+        suffix = ":notify" if args.notify_done else ""
+        text = f"[[xsrc:from={origin}{suffix}]]\n{text}"
     target = resolve_target(args.target, args.session)
     entity = coerce_entity(target)
 

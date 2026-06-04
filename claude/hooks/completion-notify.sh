@@ -72,21 +72,30 @@ for i in range(len(parsed) - 1, -1, -1):
 if last_user_idx < 0 or not last_user_txt:
     out("SKIP")
 
-m = re.search(r"\[\[xnotify:from=([^\]\s]*)\]\]", last_user_txt)
-if not m:
+# 출처 마커 [[xsrc:from=<origin>[:notify]]]. :notify 가 있을 때만 완료 핑.
+m = re.search(r"\[\[xsrc:from=([^\]:\s]+)(:notify)?\]\]", last_user_txt)
+if not m or not m.group(2):
     out("SKIP")
 origin = m.group(1) or "?"
 
-# 현재 턴의 마지막 assistant 텍스트 꼬리.
-tail = ""
+# 결과 꼬리: 실제 운영자에게 보낸 telegram reply 도구의 text 우선,
+# 없으면 마지막 assistant 텍스트 블록(모델 혼잣말일 수 있음) fallback.
+reply_text = ""
+text_block = ""
 for d in parsed[last_user_idx:]:
     if d and d.get("type") == "assistant":
         c = (d.get("message", {}) or {}).get("content", [])
         if isinstance(c, list):
             for it in c:
-                if isinstance(it, dict) and it.get("type") == "text" and it.get("text"):
-                    tail = it["text"]
-tail = re.sub(r"\s+", " ", tail).strip()[:400]
+                if not isinstance(it, dict):
+                    continue
+                if it.get("type") == "tool_use" and it.get("name") == "mcp__plugin_telegram_telegram__reply":
+                    t = (it.get("input") or {}).get("text")
+                    if t:
+                        reply_text = t
+                elif it.get("type") == "text" and it.get("text"):
+                    text_block = it["text"]
+tail = re.sub(r"\s+", " ", (reply_text or text_block)).strip()[:400]
 
 # dedup 키: transcript + user 인덱스 (같은 턴 중복 발송 방지).
 import hashlib
