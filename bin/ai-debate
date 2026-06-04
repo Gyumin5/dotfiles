@@ -54,15 +54,22 @@ ROLE_REGISTRY = {
     "debater": {
         "instructions": (
             "당신은 토론자(debater). 주어진 task에 대해 자신의 의견을 제시하라. "
-            "구체 근거(evidence)와 검증 방법(verification)을 포함하라. confidence는 0.0~1.0."
+            "구체 근거(evidence)와 검증 방법(verification)을 포함하라. confidence는 0.0~1.0. "
+            "이전 라운드 출력이 있어도 다수 의견에 영합하지 마라 — 근거로만 입장을 바꿔라. "
+            "reconciliation 라운드 지시가 있으면 position_changed_reason(입장 유지/변경 사유), "
+            "remaining_dissent(남은 반대의견), refutation_condition(내 입장이 틀렸다고 인정할 조건)을 채워라(그 외엔 생략)."
         ),
-        "schema": ["position", "reasoning", "evidence", "verification", "confidence"],
+        "schema": ["position", "reasoning", "evidence", "verification", "confidence",
+                   "position_changed_reason", "remaining_dissent", "refutation_condition"],
         "auto_priority": 100,
     },
     "critic": {
         "instructions": (
             "당신은 비판자(critic). 다른 역할 출력의 가장 약한 가정, 반증, 누락 risk를 찾아라. "
-            "should_proceed는 진행 안전 판정. 동의에 휘둘리지 말고 적대적 시각."
+            "동의에 휘둘리지 말고 적대적 시각. 다수가 같은 의견이어도 검증 없이 강화하지 마라 — "
+            "이전 라운드 소수의견이 옳을 가능성을 우선 검토하고, 합의하면 안 되는 이유를 찾아라. "
+            "should_proceed=true 는 '미해결 핵심 위험이나 근거 부족이 없다'는 뜻이다(단순 합의 아님). "
+            "미해결 위험·근거부족이 남았으면 should_proceed=false."
         ),
         "schema": ["weakest_assumption", "counter_examples", "missed_risks", "should_proceed", "reasoning"],
         "auto_priority": 100,  # 항상 강제 추가
@@ -115,6 +122,8 @@ SCHEMAS["arbiter"] = [
     "open_questions",
     "role_coverage",
     "call_budget_used",
+    # 2026-06-04 anti-conformity: round1 소수의견이 최종에 살아남았는지/반영됐는지 판정.
+    "minority_survived",
 ]
 
 
@@ -139,7 +148,7 @@ def project_memory():
     return "\n---\n".join(parts)
 
 
-def role_prompt(role, task, memory_block, prior_block):
+def role_prompt(role, task, memory_block, prior_block, round_idx=None, is_final_round=False):
     schema_keys = SCHEMAS[role]
     if role in ROLE_REGISTRY:
         instructions = ROLE_REGISTRY[role]["instructions"]
@@ -152,11 +161,23 @@ def role_prompt(role, task, memory_block, prior_block):
             "역할별 합의/이견을 통합하되 per-agent(codex/gemini/claude) 라벨링은 출력하지 말 것. "
             "risks(주요 위험 목록), open_questions(미해결 질문), role_coverage(어느 역할이 어떤 기여를 했는지 요약, 에이전트 이름 없이), "
             "call_budget_used(예: '12/24'), dissent(채택 안 된 의견)을 채워라. "
+            "입력에 [ROUND1 독립 입장]과 [MINORITY REPORT]가 별도로 주어진다. 후속 라운드의 수렴 결과만 보지 말고, "
+            "round1 원본 입장과 소수의견이 옳았을 가능성을 반드시 점검해서 결론에 반영하라. "
+            "minority_survived 에는 round1 소수의견이 최종 결론에 살아남았는지/검토 후 기각됐다면 그 사유를 한 줄로 적어라. "
             "동적 역할이 아닌 경우(debater+critic만) risks/open_questions/role_coverage/call_budget_used는 빈 값 또는 생략 가능."
         )
     else:
         # 알 수 없는 역할 — fallback
         instructions = f"역할: {role}. 주어진 task에 답하라."
+
+    # reconciliation 라운드(마지막 라운드)의 debater: 새 주장 대신 입장 정리 + 소수의견 보존.
+    if role == "debater" and is_final_round:
+        instructions = instructions + (
+            "\n\n[reconciliation 라운드 — 마지막] 새 주장·새 논거 추가 금지. 다음만 정리하라: "
+            "position_changed_reason(round1 입장 유지/변경 사유), 받아들인 새 근거, "
+            "remaining_dissent(끝까지 남은 반대의견), refutation_condition(내 입장이 틀렸다고 인정할 조건). "
+            "다수에 영합하지 말고 round1 입장과 지금 입장의 차이를 분명히 밝혀라."
+        )
 
     parts = [f"역할: {role}", "", instructions, ""]
     if memory_block:
@@ -336,6 +357,25 @@ def consensus_reached(round_outputs):
     return sum(jaccards) / len(jaccards) >= 0.5
 
 
+def escalation_triggered(round_outputs):
+    """--deep adaptive 4~5라운드 트리거: critic should_proceed 분기(핵심 위험 미해결) 또는
+    debater 평균 confidence < 0.6(저신뢰). 둘 중 하나면 확장. (2026-06-04)"""
+    crits = [o for o in round_outputs if o.get("_role") == "critic" and "_error" not in o]
+    debs = [o for o in round_outputs if o.get("_role") == "debater" and "_error" not in o]
+    sp = [_truthy_sp(c.get("should_proceed")) for c in crits]
+    if sp and any(sp) and not all(sp):
+        return True  # critic 간 판정 분기 = 미해결 위험
+    confs = []
+    for d in debs:
+        try:
+            confs.append(float(d.get("confidence")))
+        except (TypeError, ValueError):
+            pass
+    if confs and (sum(confs) / len(confs)) < 0.6:
+        return True
+    return False
+
+
 def build_prior_block(prior_outputs):
     if not prior_outputs:
         return ""
@@ -352,8 +392,9 @@ def build_prior_block(prior_outputs):
     return "[이전 라운드 출력]\n" + json.dumps(summary, ensure_ascii=False, indent=2)[:10000]
 
 
-def run_round(round_idx, task, memory_block, prior_outputs, run_dir, skip_agents=None, roles=None):
-    """skip_agents: 이전 라운드에서 실패한 provider 제외. roles: None이면 ROLES 기본."""
+def run_round(round_idx, task, memory_block, prior_outputs, run_dir, skip_agents=None, roles=None, is_final_round=False):
+    """skip_agents: 이전 라운드에서 실패한 provider 제외. roles: None이면 ROLES 기본.
+    is_final_round: 마지막 라운드면 debater 를 reconciliation 모드로. round1 은 prior 없어 자동 독립."""
     prior_block = build_prior_block(prior_outputs)
     skip_agents = skip_agents or set()
     active_pool = [a for a in POOL if a not in skip_agents]
@@ -364,7 +405,7 @@ def run_round(round_idx, task, memory_block, prior_outputs, run_dir, skip_agents
     for agent in active_pool:
         for role in roles:
             label = f"r{round_idx}.{role}.{agent}"
-            prompt = role_prompt(role, task, memory_block, prior_block)
+            prompt = role_prompt(role, task, memory_block, prior_block, round_idx=round_idx, is_final_round=is_final_round)
             tasks.append((agent, role, prompt, label))
 
     outputs = []
@@ -377,8 +418,44 @@ def run_round(round_idx, task, memory_block, prior_outputs, run_dir, skip_agents
     return outputs
 
 
+def _truthy_sp(v):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "yes", "예", "y", "1")
+    return False
+
+
+def build_arbiter_block(all_outputs):
+    """arbiter 입력: 전체 prior + round1 독립 원본 + minority report 를 별도 섹션으로.
+    후속 라운드 수렴에 묻힌 소수의견을 arbiter 가 반드시 다시 보게 한다(2026-06-04 anti-conformity)."""
+    full = build_prior_block(all_outputs)
+    r1 = [o for o in all_outputs if o.get("_round") == 1 and "_error" not in o]
+    r1_compact = []
+    for o in r1:
+        role = o.get("_role", "?")
+        keys = SCHEMAS.get(role, [])
+        compact = {k: o.get(k) for k in keys if o.get(k) is not None}
+        r1_compact.append({"agent": o.get("_agent"), "role": role, **compact})
+    deb_positions = [{"agent": o.get("_agent"), "position": o.get("position")}
+                     for o in r1 if o.get("_role") == "debater"]
+    minority = [{"agent": o.get("_agent"), "missed_risks": o.get("missed_risks"),
+                 "reasoning": o.get("reasoning")}
+                for o in r1 if o.get("_role") == "critic" and not _truthy_sp(o.get("should_proceed"))]
+    parts = [full, "",
+             "[ROUND1 독립 입장 — 앵커링 없이 생성된 원본. 후속 수렴에 묻지 말고 반드시 재검토]",
+             json.dumps(r1_compact, ensure_ascii=False, indent=2)[:6000]]
+    if deb_positions:
+        parts += ["", "[ROUND1 debater 입장 목록 — 소수의견 점검용]",
+                  json.dumps(deb_positions, ensure_ascii=False, indent=2)[:3000]]
+    if minority:
+        parts += ["", "[MINORITY REPORT — round1 비판자 반대/미해결 위험. 기각하려면 사유 명시]",
+                  json.dumps(minority, ensure_ascii=False, indent=2)[:3000]]
+    return "\n".join(parts)
+
+
 def run_arbiter(task, memory_block, all_outputs, run_dir):
-    prior_block = build_prior_block(all_outputs)
+    prior_block = build_arbiter_block(all_outputs)
     prompt = role_prompt("arbiter", task, memory_block, prior_block)
     out = call_agent("codex", "arbiter", prompt, run_dir, "arbiter")
     return out
@@ -448,8 +525,9 @@ def select_roles(task, args, run_dir):
 def main():
     ap = argparse.ArgumentParser(description="ai-debate: 멀티 AI 합의 토론")
     ap.add_argument("task", help="토론할 task")
-    ap.add_argument("--max-rounds", type=int, default=2, help="기본 2라운드. --deep 시 5.")
-    ap.add_argument("--deep", action="store_true", help="고비용 모드: 5라운드 합의 시도. 명시 옵션 전용.")
+    ap.add_argument("--max-rounds", type=int, default=2, help="기본 2라운드. --deep 시 최대 3(미합의 시 조건부 4~5).")
+    ap.add_argument("--deep", action="store_true",
+                    help="심화 모드: 최대 3라운드 + 다양성/반증 강화. 미합의·고불확실 시에만 4~5 adaptive escalation.")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--with-memory", action="store_true", help="프로젝트 메모리 주입 (기본: off)")
     ap.add_argument("--no-cache", action="store_true", help="24h 캐시 무시하고 새로 토론")
@@ -463,9 +541,13 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="planner+선택역할+예상콜수만 출력, 실제 에이전트 호출 안 함")
     args = ap.parse_args()
+    # --deep: 기본 최대 3라운드(다양성·반증 강화). 4~5는 adaptive escalation 으로만.
+    # MAD groupthink/Degeneration-of-Thought 연구 반영 (2026-06-04 ai-debate run-20260604T085529Z).
+    deep_escalate_max = args.max_rounds
     if args.deep:
-        args.max_rounds = max(args.max_rounds, 5)
-        # 5라운드 × 기본 2역할 × 풀 3 + arbiter = 31콜 > 기본 예산 24 → 예산도 함께 상향.
+        args.max_rounds = max(args.max_rounds, 3)
+        deep_escalate_max = max(args.max_rounds, 5)
+        # 3라운드 기본 + 조건부 5라운드까지 → 예산 상향 (5×2역할×3풀 + arbiter = 31).
         args.max_total_calls = max(args.max_total_calls, 40)
 
     task = args.task
@@ -565,8 +647,14 @@ def main():
     final_consensus = False
     rounds_done = 0
     skip_agents = set()
-    for round_idx in range(1, args.max_rounds + 1):
-        outs = run_round(round_idx, task, memory_block, all_outputs, run_dir, skip_agents, roles=selected_roles)
+    effective_max = args.max_rounds       # 기본 라운드 상한 (--deep 이면 3)
+    escalated = False                     # adaptive 4~5라운드 확장 여부
+    round_idx = 0
+    while round_idx < effective_max:
+        round_idx += 1
+        is_final = (round_idx >= effective_max)   # 마지막 라운드 = reconciliation
+        outs = run_round(round_idx, task, memory_block, all_outputs, run_dir, skip_agents,
+                         roles=selected_roles, is_final_round=is_final)
         (run_dir / f"r{round_idx}.outputs.json").write_text(
             json.dumps(outs, ensure_ascii=False, indent=2), encoding="utf-8")
         all_outputs.extend(outs)
@@ -579,6 +667,14 @@ def main():
         if "debater" in selected_roles and "critic" in selected_roles and consensus_reached(outs):
             final_consensus = True
             break
+        # adaptive escalation (--deep 전용): 기본 라운드 다 썼는데 미합의 + 핵심충돌/저신뢰 → 4~5라운드로 1회 확장.
+        if (args.deep and not escalated and round_idx >= args.max_rounds
+                and effective_max < deep_escalate_max and escalation_triggered(outs)):
+            effective_max = deep_escalate_max
+            escalated = True
+            (run_dir / "escalation.txt").write_text(
+                f"escalated {args.max_rounds}->{deep_escalate_max} at round {round_idx}: 미합의 + trigger(critic 분기/저신뢰)\n",
+                encoding="utf-8")
 
     # 부분 실패 임계: 성공 콜 / 예정 콜 < 2/3 이면 arbiter 안 부르고 실패 종료.
     expected_round_calls = len(selected_roles) * len(POOL) * rounds_done
@@ -692,7 +788,7 @@ def main():
     if sc:
         _p(f"  stop_condition: {sc}")
     # 신규 다역할 필드 (있으면 출력)
-    for k in ("risks", "open_questions", "role_coverage", "call_budget_used"):
+    for k in ("risks", "open_questions", "role_coverage", "call_budget_used", "minority_survived"):
         v = arb.get(k)
         if v:
             if isinstance(v, list):
@@ -716,6 +812,16 @@ def main():
                 # 진단용: task 원문 hash 와 preview 보존 (cross-topic cache hit 디버깅).
                 "task_sha256": _h.sha256(task.encode("utf-8")).hexdigest(),
                 "task_preview": task[:480],
+                # 2026-06-04 anti-conformity: round1 독립출력 + dissent 보존 →
+                # 잘못 수렴된 최종 요약만 재사용되는 것을 사람이 검증 가능하게.
+                "round1_outputs": [
+                    {"agent": o.get("_agent"), "role": o.get("_role"),
+                     "position": o.get("position"), "should_proceed": o.get("should_proceed")}
+                    for o in all_outputs if o.get("_round") == 1 and "_error" not in o
+                ],
+                "arbiter_dissent": arb.get("dissent"),
+                "minority_survived": arb.get("minority_survived"),
+                "escalated": escalated,
             }, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
