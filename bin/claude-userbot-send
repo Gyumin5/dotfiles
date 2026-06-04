@@ -69,9 +69,15 @@ def main():
     ap.add_argument("--session", action="store_true", help="target 을 targets.json 세션이름으로 해석")
     ap.add_argument("--delete-after", type=float, default=0, metavar="SEC",
                     help="발송 N초 뒤 메시지 삭제 (대상 세션 getUpdates 가 받은 뒤 채팅 정리용). trigger 노이즈 제거.")
+    ap.add_argument("--notify-done", action="store_true",
+                    help="크로스세션 작업 완료 핑 요청. 메시지 앞에 마커 [[xnotify:from=<보낸세션>]] prepend. "
+                         "받은 세션 Stop 훅(completion-notify)이 완료 시 자기 봇으로 운영자 챗에 1회 알림.")
     args = ap.parse_args()
 
     text = " ".join(args.message)
+    if args.notify_done:
+        origin = os.environ.get("CLAUDE_SESSION_NAME") or "?"
+        text = f"[[xnotify:from={origin}]]\n{text}"
     target = resolve_target(args.target, args.session)
     entity = coerce_entity(target)
 
