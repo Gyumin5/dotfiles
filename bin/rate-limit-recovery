@@ -124,7 +124,7 @@ trigger_flush() {
     [ -n "$botuser" ] || return 1
     # --delete-after 8: 세션이 getUpdates 로 받은 뒤 trigger 메시지 삭제 → 채팅 노이즈 제거.
     if [ -x "$USERBOT_SEND" ] && [ -f "$USERBOT_SESSION" ]; then
-        "$USERBOT_SEND" --delete-after 8 "$botuser" "trigger:queue-flush" >/dev/null 2>&1 && return 0
+        "$USERBOT_SEND" --no-origin --delete-after 8 "$botuser" "trigger:queue-flush" >/dev/null 2>&1 && return 0
         return 1
     fi
     if [ -f "$RELAY_CONF" ]; then
@@ -133,7 +133,7 @@ trigger_flush() {
         if [ -n "${USERBOT_HOST:-}" ]; then
             # 비대화형 ssh 는 ~/.local/bin 이 PATH 에 없으므로 절대경로(~remote 확장).
             ssh -o BatchMode=yes -o ConnectTimeout=20 "$USERBOT_HOST" \
-                "~/.local/bin/claude-userbot-send --delete-after 8 '${botuser}' 'trigger:queue-flush'" >/dev/null 2>&1 && return 0
+                "~/.local/bin/claude-userbot-send --no-origin --delete-after 8 '${botuser}' 'trigger:queue-flush'" >/dev/null 2>&1 && return 0
         fi
     fi
     return 1
