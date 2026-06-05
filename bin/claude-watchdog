@@ -51,3 +51,7 @@ for unit in $(systemctl --user list-unit-files 'claude-*.service' --state=enable
     # --- 3. jsonl 무응답 자동 복구 비활성화 (idle 세션과 구분 불가, false positive 잦음) ---
     # 멈춘 세션은 사용자가 claude-sessions restart <name> 수동 복구.
 done
+
+# 루프 마지막 명령이 false 테스트([ != active ])면 종료코드가 1로 새어 systemd가
+# 매분 service를 failed로 표시함. 작업은 정상 수행됐으므로 명시적 성공 종료.
+exit 0
