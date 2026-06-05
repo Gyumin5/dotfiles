@@ -89,7 +89,7 @@ def run_one(task, arm, rep):
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=RUN_TIMEOUT,
-                           cwd=WORKDIR, env=env)
+                           cwd=WORKDIR, env=env, stdin=subprocess.DEVNULL)
         dur = time.time() - t0
         out = p.stdout
         try:
