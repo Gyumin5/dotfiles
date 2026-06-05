@@ -403,8 +403,57 @@ def read_statusline():
         return f"[statusline read error] {e}"
 
 
+def _session_bot_token(name):
+    """세션별 텔레그램 봇 토큰. 세션 WorkingDirectory 의 .claude/telegram/.env 에서."""
+    unit = f"claude-{name}.service"
+    try:
+        wd = subprocess.check_output(
+            ["systemctl", "--user", "show", "-p", "WorkingDirectory", "--value", unit],
+            text=True, timeout=3,
+        ).strip()
+    except Exception:
+        wd = ""
+    if not wd:
+        return None
+    env = Path(wd) / ".claude" / "telegram" / ".env"
+    try:
+        for line in env.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for key in ("TELEGRAM_BOT_TOKEN", "BOT_TOKEN"):
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        return None
+    return None
+
+
+def _telegram_pending(name):
+    """봇의 미소비 업데이트 수(getWebhookInfo). None=확인 불가.
+    getUpdates 를 건드리지 않아 세션 폴링을 방해하지 않음(비침습)."""
+    tok = _session_bot_token(name)
+    if not tok:
+        return None
+    try:
+        url = f"https://api.telegram.org/bot{tok}/getWebhookInfo"
+        with urllib.request.urlopen(url, timeout=5) as r:
+            d = json.loads(r.read())
+        if not d.get("ok"):
+            return None
+        return d.get("result", {}).get("pending_update_count")
+    except Exception:
+        return None
+
+
 def session_health(name):
-    """(service_active, bun_alive) tuple. bun=텔레그램 MCP 자식."""
+    """(service_active, telegram_ok) tuple.
+
+    채널(experimental) 텔레그램은 세션 프로세스 in-process 로 getUpdates 를 폴링한다
+    (별도 bun/MCP 상주 프로세스 없음 — 구버전 bun 검사는 항상 false 라 폐기).
+    각 세션이 자기 봇을 직접 폴링하므로, 봇에 미소비 업데이트가 쌓이면(=세션이
+    폴링 못 함) 비정상. getWebhookInfo 의 pending_update_count 로 비침습 판정한다.
+    근거: 중단된 세션 봇은 pending 이 쌓이고(예 1+), 정상 세션은 0 으로 관측됨."""
     unit = f"claude-{name}.service"
     try:
         active = subprocess.check_output(
@@ -414,41 +463,14 @@ def session_health(name):
         active = False
     if not active:
         return False, False
-    bun_alive = False
-    cg = ""
-    try:
-        cg = subprocess.check_output(
-            ["systemctl", "--user", "show", "-p", "ControlGroup", "--value", unit],
-            text=True, timeout=3,
-        ).strip()
-    except Exception:
-        cg = ""
-    cgroup_paths = []
-    if cg:
-        cgroup_paths.append(f"/sys/fs/cgroup{cg}/cgroup.procs")
-    cgroup_paths.extend([
-        f"/sys/fs/cgroup/systemd/user.slice/user-1000.slice/user@1000.service/{unit}/cgroup.procs",
-        f"/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/{unit}/cgroup.procs",
-    ])
-    for cp in cgroup_paths:
-        try:
-            with open(cp) as f:
-                for line in f:
-                    pid = line.strip()
-                    if not pid:
-                        continue
-                    try:
-                        with open(f"/proc/{pid}/comm") as cf:
-                            if cf.read().strip() == "bun":
-                                bun_alive = True
-                                break
-                    except Exception:
-                        continue
-            if bun_alive:
-                break
-        except FileNotFoundError:
-            continue
-    return active, bun_alive
+    pending = _telegram_pending(name)
+    if pending is None:
+        # 확인 불가(토큰/네트워크) → 프로세스 살아있으면 ok 로 간주(가짜 ⚪ 방지)
+        telegram_ok = True
+    else:
+        # 소량 transient(막 도착, 폴링 직전)은 허용, 누적은 비정상
+        telegram_ok = pending < 3
+    return active, telegram_ok
 
 
 def session_menu_markup(action):
