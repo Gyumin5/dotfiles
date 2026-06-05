@@ -215,32 +215,17 @@ history/active.md (SessionStart 주입 대상)
 
 ctx_session = 세션 임시 메모, ctx_knowledge = 프로젝트 영구 사실 (코드에서 안 읽히는 것). memory는 사용자 프로필/피드백, ctx_*는 작업 상태.
 
-# lean-ctx — 강제 규칙
-<!-- lean-ctx-rules-v5 -->
+# 도구 정책 — 네이티브 기본, lean-ctx 옵트인
 
-| 금지 | 사용 |
-|------|------|
-| Read/cat/head/tail | ctx_read |
-| Shell/bash | ctx_shell |
-| Grep/rg | ctx_search |
-| ls/find/tree | ctx_tree |
+기본 경로는 네이티브 도구다: 파일은 Read/Grep/Glob, 셸은 Bash, 코드 탐색은 rg/LSP/ctags.
+이전의 "native Read/Grep/Shell FORBIDDEN / lean-ctx MANDATORY" 전면 강제는 폐기한다.
+(근거: 2026-06-05 ai-debate run-20260604T235639Z — 클로즈드 1인 바이너리가 모든 read/search/shell critical path 를 독점하는 구조는 공급망·유출·bus factor 단일 실패점. 토큰 절감은 자가보고뿐 독립 입증 없음.)
 
-Write/StrReplace/Delete/Glob은 그대로 사용.
-<!-- /lean-ctx -->
+lean-ctx(ctx_read/ctx_search/ctx_shell/ctx_tree)는 옵트인 가속기로만:
+- 대용량 파일·디렉토리 반복 탐색, 심볼/시그니처 맵이 토큰을 크게 아낄 때만 선택적으로.
+- 어떤 작업도 lean-ctx 를 강제하지 않는다. 네이티브로 충분하면 네이티브.
+- ctx_session(세션 임시 메모), ctx_knowledge(프로젝트 영구 사실)는 계속 사용 가능.
 
-# lean-ctx — Context Engineering Layer
-<!-- lean-ctx-rules-v5 -->
+보안 전제: lean-ctx 는 자동 업데이트(github API 체크)·클라우드 연동(~/.lean-ctx/cloud) 비활성 유지. 네트워크 송신·파일 접근 범위는 strace/감사로 확인 전까지 신뢰하지 않는다.
 
-MANDATORY: Use lean-ctx MCP tools for ALL reads and searches. Native Read/Grep/Shell are FORBIDDEN.
-
-| FORBIDDEN | USE INSTEAD |
-|-----------|-------------|
-| `Read` / `cat` / `head` / `tail` | `ctx_read(path)` — cached, 8 compression modes |
-| `Shell` / `bash` / terminal | `ctx_shell(command)` — pattern compression |
-| `Grep` / `rg` / search | `ctx_search(pattern, path)` — compact results |
-| `ls` / `find` / `tree` | `ctx_tree(path, depth)` — directory maps |
-
-Keep using Write, StrReplace, Delete, Glob normally (no lean-ctx replacement).
-
-REMINDER: NEVER use Read, Shell, Grep, or ls. ALWAYS use ctx_read, ctx_shell, ctx_search, ctx_tree.
-<!-- /lean-ctx -->
+재평가: 4~6주 A/B 측정(토큰·정확도·재작업·네트워크 감사) 후 유지/폐기 최종 결정.
