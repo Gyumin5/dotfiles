@@ -102,30 +102,6 @@ fi
 
 # 3. 5h / 7d 사용량 체크 (둘 중 하나라도 임계 초과면 차단)
 [ -f "$CACHE" ] || exit 0
-
-# 2.7. 계정 전환 감지 — 캐시의 rate_limits 는 캐시에 박힌 계정 것이다.
-#      현재 로그인 계정(~/.claude.json)이 캐시 계정과 다르면 캐시는 구계정 수치 →
-#      막지 말고 통과시켜 대화를 이어가게 한다. 그러면 statusline.py 가 새 계정
-#      사용량으로 캐시를 갱신하고, 그 후부터 정상 임계 판정이 된다.
-#      (수동 rate-limit-bypass.flag 의 자동 대체. 계정 전환 시 stuck 방지.)
-CLAUDE_JSON=~/.claude.json
-if [ -f "$CLAUDE_JSON" ]; then
-    ACCT_CMP=$(python3 -c '
-import json
-try:
-  cache = json.load(open("'"$CACHE"'"))
-  cj = json.load(open("'"$CLAUDE_JSON"'"))
-  cached = cache.get("account")
-  live = (cj.get("oauthAccount") or {}).get("emailAddress")
-  # 둘 다 존재하고 서로 다르면 mismatch (캐시 stale)
-  print("MISMATCH" if (cached and live and cached != live) else "OK")
-except Exception:
-  print("OK")' 2>/dev/null)
-    if [ "$ACCT_CMP" = "MISMATCH" ]; then
-        exit 0
-    fi
-fi
-
 INFO=$(python3 -c '
 import json, datetime, time
 def fmt_reset(ts):
