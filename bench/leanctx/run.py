@@ -20,7 +20,8 @@ TASKS      = os.environ.get("TASKS", os.path.join(os.path.dirname(os.path.abspat
 RESULTS    = os.environ.get("RESULTS", os.path.join(BENCH, "results.jsonl"))
 CLAUDE     = os.environ.get("CLAUDE_BIN", "/home/gmoh/.local/bin/claude")
 REPS       = int(os.environ.get("REPS", "3"))
-RUN_TIMEOUT= int(os.environ.get("RUN_TIMEOUT", "240"))
+RUN_TIMEOUT= int(os.environ.get("RUN_TIMEOUT", "180"))
+MAX_BUDGET = os.environ.get("MAX_BUDGET_USD", "0.80")   # runaway backstop per run
 WORKDIR    = os.path.join(BENCH, "work")          # neutral cwd (no project CLAUDE.md)
 
 ARMS = {
@@ -83,6 +84,7 @@ def run_one(task, arm, rep):
     env["HOME"] = a["home"]
     prompt = task["prompt"] + PROMPT_SUFFIX
     cmd = [CLAUDE, "-p", prompt, "--output-format", "json",
+           "--max-budget-usd", MAX_BUDGET,
            "--strict-mcp-config", "--mcp-config", a["mcp"]]
     t0 = time.time()
     try:
