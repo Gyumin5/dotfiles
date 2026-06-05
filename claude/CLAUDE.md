@@ -110,7 +110,7 @@ Bash timeout 600000ms. 응답 없이 진행 금지. 실패 시 해당 PID만 kil
 
 - PDF: 한 번에 5페이지 이내씩만 read. 첫 호출은 목차·서론만, 필요한 챕터만 추가 read. `pages=1-5` 식으로 명시.
 - 긴 로그·텍스트: head/tail/sort/awk로 줄여서. `cat <large.log>` 통째 금지. grep 결과도 `| head -50` 같이 제한.
-- 큰 코드 파일: ctx_read 의 `mode='signatures'` 또는 `mode='lines:N-M'` 활용. 통째 read 금지.
+- 큰 코드 파일: Read 의 offset/limit 으로 필요한 구간만, 심볼은 rg/Grep 로 위치 먼저. 통째 read 금지.
 - 큰 텍스트 분석은 stdin 파이프로 ai-collaborate 외부 AI 처리 → 우리 컨텍스트 안 늘어남.
 - 작업 시작 전 파일 크기 확인 (wc -l, du -h). 5MB 또는 1만 줄 넘으면 잘라 읽기.
 - 텔레그램 attachment 큰 거 받으면 download 후 위 룰대로 처리. 통째 read 금지.
