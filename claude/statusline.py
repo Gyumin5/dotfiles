@@ -12,6 +12,7 @@ CACHE_FILE = os.path.expanduser("~/.claude/statusline_cache.json")
 HISTORY_DIR = os.path.expanduser("~/.claude/state/usage-history")
 ANOMALY_FLAG = os.path.expanduser("~/.claude/state/usage-anomaly-alerted.flag")
 CONTROL_BOT_ENV = os.path.expanduser("~/.claude/control-bot/.env")
+CLAUDE_JSON = os.path.expanduser("~/.claude.json")
 ANOMALY_DROP_PP = 20
 ANOMALY_COOLDOWN_SEC = 30 * 60
 
@@ -39,6 +40,15 @@ def _alert_telegram(msg):
         open(ANOMALY_FLAG, "w").close()
     except Exception:
         pass
+
+
+def _logged_in_account():
+    """현재 로그인된 Anthropic 계정 이메일. ~/.claude.json oauthAccount.emailAddress."""
+    try:
+        d = json.load(open(CLAUDE_JSON))
+        return (d.get("oauthAccount") or {}).get("emailAddress")
+    except Exception:
+        return None
 
 
 def _track_usage(data):
@@ -88,6 +98,10 @@ def main():
 
     try:
         data["_cached_at"] = time.time()
+        # 로그인 계정 식별자도 캐시에 기록 (rate-limit-guard 의 계정전환 감지 +
+        # 컨트롤봇 status 표시용). 계정이 바뀌면 캐시의 rate_limits 는 구계정 것이라
+        # 가드가 이를 비교해 stale 캐시를 무시한다.
+        data["account"] = _logged_in_account()
         with open(CACHE_FILE, "w") as f:
             json.dump(data, f)
     except Exception:
