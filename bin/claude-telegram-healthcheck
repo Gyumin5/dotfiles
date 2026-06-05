@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """claude-telegram-healthcheck — 프로젝트 봇 inbound 좀비 감시.
 
-원리: getUpdates 는 ack 안 한 update 큐를 보여준다. 정상 bun 은 long-poll 로
-즉시 가져가서 큐가 비어 있다. pending ≥ 1 + 가장 오래된 메시지가 ZOMBIE_AGE_SEC
-초 이상이면 좀비로 판정하고 컨트롤봇으로 알림.
+원리(2026-06-05 개정):
+정상 세션은 텔레그램 채널을 in-process 로 long-poll 해서 큐(pending)를 즉시
+비운다. 봇 채널이 죽으면(좀비) pending 이 계속 안 빠진다.
 
-자동 restart 안 함 — 진행 중 컨텍스트 보호. 알림만.
+오발 방지가 핵심이다 — 세션이 긴 작업/깊은 사고(单 턴 16분+ 관측)로 잠깐 폴링을
+멈추면 pending 이 일시적으로 쌓였다가 폴링 재개 시 빠진다. 이건 좀비가 아니다.
+그래서 "오래된 메시지 1건"(구버전 60s)만으로 판정하지 않고, pending 이 STUCK_SEC
+동안 한 번도 0 으로 안 빠진 '지속 적체'일 때만 좀비로 본다.
 
-쿨다운: 세션별 ALERT_COOLDOWN_SEC.
+비침습: 큐 확인은 getWebhookInfo(pending_update_count) 로 한다. 구버전은 getUpdates
+를 썼는데, 그건 세션 자신의 long-poll 과 충돌(409)해서 정상 세션 폴링을 방해했다.
+getWebhookInfo 는 getUpdates 를 건드리지 않는다.
+
+자동 restart 안 함 — 진행 중 컨텍스트 보호. 알림만. 쿨다운: 세션별 ALERT_COOLDOWN_SEC.
 """
 
 import json
@@ -17,7 +24,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-ZOMBIE_AGE_SEC = 60
+# pending 이 이 시간동안 한 번도 0 으로 안 빠지면 좀비. 세션의 최장 단일 턴
+# (deep thinking/long tool, 관측상 ~16-20분)보다 넉넉히 길게 잡아 오발 방지.
+STUCK_SEC = 1800            # 30분
 ALERT_COOLDOWN_SEC = 3600
 HTTP_TIMEOUT = 8
 
@@ -99,31 +108,42 @@ def svc_telegram_state_dir(unit):
     return None
 
 
-def fetch_pending(token):
-    """Return list of pending updates (no ack). Empty list if healthy or error."""
+def pending_count(token):
+    """getWebhookInfo 의 pending_update_count. None=확인 불가(에러).
+    getUpdates 를 건드리지 않아 세션 long-poll 과 충돌하지 않음(비침습)."""
     try:
-        url = (
-            f"https://api.telegram.org/bot{token}/getUpdates"
-            f"?limit=10&timeout=0"
-        )
+        url = f"https://api.telegram.org/bot{token}/getWebhookInfo"
         with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as r:
             data = json.loads(r.read())
         if not data.get("ok"):
             return None
-        return data.get("result", [])
+        return int(data.get("result", {}).get("pending_update_count", 0))
     except Exception:
         return None
 
 
-def oldest_message_age(updates):
-    now = int(time.time())
-    ages = []
-    for u in updates:
-        m = u.get("message") or u.get("edited_message") or u.get("channel_post") or {}
-        ts = m.get("date")
-        if ts:
-            ages.append(now - int(ts))
-    return max(ages) if ages else 0
+def _nonzero_file(unit):
+    return STATE_DIR / f"{unit}.nonzero_since"
+
+
+def stuck_since(unit, pending):
+    """pending 이 연속으로 ≥1 인 streak 의 시작 시각을 추적.
+    pending==0 이면 streak 리셋. 반환=streak 시작 ts(없으면 now)."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    f = _nonzero_file(unit)
+    now = time.time()
+    if pending <= 0:
+        try:
+            f.unlink()
+        except FileNotFoundError:
+            pass
+        return None
+    # pending >= 1
+    try:
+        return float(f.read_text().strip())
+    except Exception:
+        f.write_text(str(now))
+        return now
 
 
 def cooldown_ok(unit):
@@ -143,6 +163,7 @@ def mark_alerted(unit):
 def main():
     control_token = load_control_token()
     results = []
+    now = time.time()
     for unit in list_claude_services():
         state_dir = svc_telegram_state_dir(unit)
         if not state_dir:
@@ -154,25 +175,27 @@ def main():
         token = env.get("TELEGRAM_BOT_TOKEN") or env.get("BOT_TOKEN")
         if not token:
             continue
-        pending = fetch_pending(token)
-        if pending is None:
+        n = pending_count(token)
+        if n is None:
             results.append((unit, "api_error", 0, 0))
             continue
-        n = len(pending)
-        age = oldest_message_age(pending) if pending else 0
-        zombie = n >= 1 and age >= ZOMBIE_AGE_SEC
-        results.append((unit, "zombie" if zombie else "ok", n, age))
+        since = stuck_since(unit, n)
+        stuck_for = max(0, int(now - since)) if since else 0
+        zombie = n >= 1 and since is not None and stuck_for >= STUCK_SEC
+        results.append((unit, "zombie" if zombie else "ok", n, stuck_for))
         if zombie and cooldown_ok(unit):
             session = unit.replace("claude-", "").replace(".service", "")
+            mins = stuck_for // 60
             msg = (
-                f"⚠ telegram-healthcheck: {session} bun 좀비 의심\n"
-                f"pending={n}, oldest_age={age}s (임계 {ZOMBIE_AGE_SEC}s)\n"
+                f"⚠ telegram-healthcheck: {session} 봇 inbound 적체 의심\n"
+                f"pending={n}, {mins}분째 안 빠짐 (임계 {STUCK_SEC // 60}분)\n"
+                f"세션이 멈췄거나 텔레그램 채널이 죽었을 수 있음.\n"
                 f"권고: cs restart {session}"
             )
             if telegram_post(control_token, CONTROL_CHAT_ID, msg):
                 mark_alerted(unit)
     # one-line summary to stdout (for journalctl)
-    summary = " | ".join(f"{u}:{s}:p{n}/a{a}" for u, s, n, a in results)
+    summary = " | ".join(f"{u}:{s}:p{n}/s{a}" for u, s, n, a in results)
     print(summary or "no-services")
     return 0
 
