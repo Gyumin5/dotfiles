@@ -1,0 +1,5 @@
+{
+  "client_id": "2ea12322-9dbb-4e74-9cb2-d1b761d98f74",
+  "tenant_id": "eab48fb7-a87a-4251-87d7-be4c26161e90",
+  "scopes": "offline_access User.Read Mail.Read Tasks.ReadWrite Chat.Read"
+}

@@ -1,0 +1,10 @@
+[증분 자동정리 — 24시간 매시간] 사용자 메시지가 없어도 즉시 수행. 자동 트리거.
+
+1) 마지막 확인시각: `cat /home/gmoh/raion/todo-sync/last_check.txt` (UTC ISO; 없으면 24h 전).
+2) 메일(완전): outlook_email_search(order=newest, afterDateTime=그시각).
+3) Teams DM(1:1/그룹/회의): chat_message_search(query "*", afterDateTime=그시각).
+4) Teams 채널 게시글(베스트에포트): chat_message_search(query "*", limit 25, 날짜필터 없이) 호출 → 반환 항목 중 channelUri 가 있고 createdDateTime > last_check 인 것만 클라이언트측에서 골라 신규로 취급. (채널은 API 날짜필터 미지원이라 직접 시각 비교.)
+5) 액션 아닌 것 제외: 식대카드(식카), 단순 알림/완료통지, 광고, CI/봇 자동로그, 단순 PR잡담. 회신요청·기한·할당작업·나(오규민/gmoh) 멘션 위주만 후보.
+6) 보낸편지함(folderName "Sent Items")·기존 DB(`python3 /home/gmoh/raion/todo-sync/todoctl.py json --all`) 대조해 회신완료/중복 제외. 명확한 신규만 `todoctl.py add`(기한·출처·메모).
+7) `date -u +%FT%TZ > /home/gmoh/raion/todo-sync/last_check.txt`.
+8) 새로 추가했거나 검토 필요 후보가 있을 때만 mcp__plugin_telegram_telegram__reply(chat_id 8689118207)로 간결 보고. 새 게 없으면 침묵(스팸 금지).

@@ -242,6 +242,24 @@ except: pass' 2>/dev/null)
   fi
 fi
 
+# raion 전용 todo 자동화 자산 설치 (MACHINE_ID=raion 일 때만). 멱등(cp -n, [ -f ] 가드).
+# 범위: 파일자산 + 의존성 + DB init 만. SessionStart 훅/settings/persistence/cron 은 제외
+# (cron 무장은 raion 의 살아있는 텔레그램 세션이 별도로 함). raion-todo-arm.sh 도 범위 외.
+if [ "$MACHINE_ID" = "raion" ] && [ -d "$DOTFILES_DIR/raion/todo-sync" ]; then
+  TODO_DIR="$HOME/raion/todo-sync"
+  mkdir -p "$TODO_DIR/prompts"
+  cp -n "$DOTFILES_DIR/raion/todo-sync/todoctl.py"  "$TODO_DIR/"
+  cp -n "$DOTFILES_DIR/raion/todo-sync/auth.py"     "$TODO_DIR/"
+  cp -n "$DOTFILES_DIR/raion/todo-sync/config.json" "$TODO_DIR/"
+  cp    "$DOTFILES_DIR/raion/todo-sync/RUNBOOK.md"  "$TODO_DIR/" 2>/dev/null || true
+  cp    "$DOTFILES_DIR"/raion/todo-sync/prompts/*.txt "$TODO_DIR/prompts/" 2>/dev/null || true
+  python3 -m pip install --user --quiet msal requests 2>/dev/null || true
+  [ -f "$TODO_DIR/todo.db" ] || python3 "$TODO_DIR/todoctl.py" init 2>/dev/null || true
+  [ -f "$TODO_DIR/last_check.txt" ] || date -u +%FT%TZ > "$TODO_DIR/last_check.txt"
+  chmod 700 "$TODO_DIR"
+  echo "[install] raion todo 자산 설치 완료. cron 등록은 텔레그램 세션에서 'todo 스케줄 켜줘'."
+fi
+
 echo ""
 echo "Dotfiles installed successfully!"
 echo "  ~/.claude/CLAUDE.md -> $DOTFILES_DIR/claude/CLAUDE.md"

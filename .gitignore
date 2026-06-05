@@ -9,3 +9,11 @@ __pycache__/
 /proposed-progress.md
 /.claude/
 /cache/
+
+# raion todo-sync 런타임 생성물 (install.sh 가 생성, repo 제외)
+/raion/todo-sync/todo.db
+/raion/todo-sync/todo.db-wal
+/raion/todo-sync/todo.db-shm
+/raion/todo-sync/last_check.txt
+/raion/todo-sync/state.json
+/raion/todo-sync/token_cache.json
