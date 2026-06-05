@@ -211,21 +211,11 @@ history/active.md (SessionStart 주입 대상)
 - SessionStart 훅은 progress.md + history/active.md만 주입. 본 history.md / 월별 archive는 lazy load (필요 시 read/grep)
 - active.md 없으면 훅이 history.md 마지막 일부로 fallback
 
-## lean-ctx 부가
+# 도구 정책 — 네이티브
 
-ctx_session = 세션 임시 메모, ctx_knowledge = 프로젝트 영구 사실 (코드에서 안 읽히는 것). memory는 사용자 프로필/피드백, ctx_*는 작업 상태.
+파일은 Read/Grep/Glob, 셸은 Bash, 코드 탐색은 rg/LSP/ctags. 이것이 유일한 기본.
+세션 메모는 progress.md, 프로젝트 영구 사실은 history.md / Claude memory, 사용자 프로필·피드백은 memory 에.
 
-# 도구 정책 — 네이티브 기본, lean-ctx 옵트인
-
-기본 경로는 네이티브 도구다: 파일은 Read/Grep/Glob, 셸은 Bash, 코드 탐색은 rg/LSP/ctags.
-이전의 "native Read/Grep/Shell FORBIDDEN / lean-ctx MANDATORY" 전면 강제는 폐기한다.
-(근거: 2026-06-05 ai-debate run-20260604T235639Z — 클로즈드 1인 바이너리가 모든 read/search/shell critical path 를 독점하는 구조는 공급망·유출·bus factor 단일 실패점. 토큰 절감은 자가보고뿐 독립 입증 없음.)
-
-lean-ctx(ctx_read/ctx_search/ctx_shell/ctx_tree)는 옵트인 가속기로만:
-- 대용량 파일·디렉토리 반복 탐색, 심볼/시그니처 맵이 토큰을 크게 아낄 때만 선택적으로.
-- 어떤 작업도 lean-ctx 를 강제하지 않는다. 네이티브로 충분하면 네이티브.
-- ctx_session(세션 임시 메모), ctx_knowledge(프로젝트 영구 사실)는 계속 사용 가능.
-
-보안 전제: lean-ctx 는 자동 업데이트(github API 체크)·클라우드 연동(~/.lean-ctx/cloud) 비활성 유지. 네트워크 송신·파일 접근 범위는 strace/감사로 확인 전까지 신뢰하지 않는다.
-
-재평가: 4~6주 A/B 측정(토큰·정확도·재작업·네트워크 감사) 후 유지/폐기 최종 결정.
+lean-ctx 는 완전 제거됨 (2026-06-05). 강제도 옵트인도 아님 — MCP 등록·바이너리·셸 훅·데이터 전부 삭제.
+근거: 통제 A/B(raion, 120런) 결과 lean-ctx 가 네이티브 대비 토큰 약 2.3배·비용 약 3배, 정확도는 동률 → 순손해. cloud/autonomy off 설정에선 토큰 이득 0이고, 그 이득을 보려면 보안상 거부한 critical-path 점유가 필요. (history #059 / #059-verify, 측정 dotfiles/bench/leanctx/)
+재도입 조건: 독립 감사된 오픈소스 대체재가 통제 A/B 에서 순절감을 입증할 때만.
