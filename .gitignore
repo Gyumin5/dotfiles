@@ -17,3 +17,9 @@ __pycache__/
 /raion/todo-sync/last_check.txt
 /raion/todo-sync/state.json
 /raion/todo-sync/token_cache.json
+
+# secrets backup — 절대 repo 에 들어가면 안 됨 (암호문이라도)
+*.tar.gz.gpg
+*.age
+/claude-secrets-backup/
+secrets/*.key
