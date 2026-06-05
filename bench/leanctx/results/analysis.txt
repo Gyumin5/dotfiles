@@ -1,0 +1,41 @@
+=== lean-ctx A/B  (20 paired tasks) ===
+
+task                         dom             nat$    lean$   save%   natTok  leanTok   nC   lC
+----------------------------------------------------------------------------------------------
+c1_dot_sh_count              dir           0.0464   0.1408  -126.4    41352    93634 1.00 1.00
+c2_dot_hooks_count           dir           0.0450   0.1385  -125.5    41327    93188 1.00 1.00
+c3_rai_imgui_cpp_count       dir           0.0594   0.1388   -46.3    63816    93369 1.00 1.00
+c4_dot_bin_total             dir           0.0467   0.1539  -125.7    41363    93376 1.00 1.00
+c5_rai_cmake_count           dir           0.0476   0.1349  -126.1    41457    93726 1.00 1.00
+g1_rai_include               content       0.0462   0.1933  -201.7    41472   125119 1.00 1.00
+g2_dot_maxrounds_default     content       0.0505   0.1549  -153.2    41987   106296 1.00 1.00
+g3_dot_first_bin             content       0.0495   0.1365  -125.6    41499    93641 1.00 1.00
+g4_rai_widgets_button_sig    content       0.0516   0.1440  -126.2    41680    94274 1.00 1.00
+l1_rai_imgui_lines           large_file    0.0466   0.1515  -124.2    41454    92934 1.00 1.00
+l2_rai_imgui_begin_line      large_file    0.0474   0.1575  -125.5    41528    93659 1.00 1.00
+l3_rai_widgets_lines         large_file    0.0342   0.1385  -124.3    41468    92994 1.00 1.00
+l4_rai_namespace_line        large_file    0.0470   0.1394  -126.0    41505    93818 1.00 1.00
+l5_rai_button_count          large_file    0.0478   0.1558  -136.7    41523    98281 1.00 1.00
+l6_rai_end_line              large_file    0.0475   0.1416  -127.4    41510    94379 1.00 1.00
+p1_dot_aidebate_path         symbol        0.0463   0.1629  -188.4    41400   119386 1.00 1.00
+p2_dot_roleprompt_file       symbol        0.0583   0.2031   -64.8    83886   138275 1.00 1.00
+p3_dot_completionnotify_file symbol        0.0463   0.1413  -127.5    41410    94215 1.00 1.00
+p4_rai_tables_path           symbol        0.0475   0.1393  -125.8    41518    93743 1.00 1.00
+p5_dot_ratelimitguard_file   symbol        0.0468   0.1432  -127.8    41454    94437 1.00 1.00
+
+=== summary (positive % = lean-ctx cheaper) ===
+total-token savings : median -126.1%  95%CI [-127.4, -125.6]  Wilcoxon p=0.0001
+cost($) savings     : median -206.5%
+work-token savings  : median -270.2%  (excludes cheap cache_read)
+correctness         : native 100.0%   lean-ctx 100.0%   (delta +0.0 pp)
+
+=== per-domain median total-token savings ===
+  content      -139.7%   (n=4)
+  dir          -125.7%   (n=5)
+  large_file   -125.8%   (n=6)
+  symbol       -127.5%   (n=5)
+
+=== verdict (pre-registered) ===
+DROP — median token savings -126.1% <= 10%; not worth the trust surface.
+
+(Token/cost = Anthropic usage block. Correctness = vs mechanically-computed oracle.)
