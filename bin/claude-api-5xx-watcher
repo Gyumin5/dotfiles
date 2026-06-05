@@ -2,29 +2,59 @@
 """
 claude-api-5xx-watcher
 
-각 claude-<proj>.service 의 최신 jsonl 을 tail 하며 assistant 메시지에
-"API Error: 5xx" 패턴이 나오면 해당 프로젝트 봇으로 텔레그램 알림.
+각 claude-<proj>.service 의 최신 jsonl 을 tail 하며, 마지막 assistant 메시지가
+"API Error: 5xx"(예: 529 Overloaded) 로 끝나 턴이 죽은 세션을 감지한다.
+감지 시 자동으로 "계속 진행해" 를 그 세션 봇에 재주입(재전송)한다.
 
-쿨다운 없음 — 5xx 가 N번 발생하면 N번 알림.
-오프셋 (uuid 기준 마지막 처리 메시지) 은 ~/.claude/state/api-5xx-watcher/<proj>.last 저장.
+재주입 메커니즘:
+  봇 sendMessage 는 인바운드가 안 됨(봇→사용자 방향). 세션이 새 프롬프트로
+  받게 하려면 "사용자 계정→봇" 메시지가 필요 → 유저봇(claude-userbot-send).
+  - 로컬에 유저봇(userbot.session) 있으면 로컬 실행(home).
+  - 없으면 ~/.claude/userbot/host 에 적힌 호스트로 ssh 해서 거기 유저봇 실행
+    (raion = 회사 머신, 개인 유저봇 미설치 → ssh home). 봇은 Telegram 으로
+    어느 머신에서든 접근되므로 home 유저봇이 raion 세션 봇에도 쏠 수 있다.
+
+폭주 방지(기존 retry-dead-loop 가드를 안전하게 대체):
+  - 백오프: 60 → 180 → 420 초.
+  - 최대 3회 자동 재전송. 그래도 5xx 면 "수동 필요" 알림 후 멈춤(gave_up).
+  - 처리 대기(직전 재전송/사용자 메시지가 아직 처리 안 됨) 중엔 재전송 안 함.
+  - 5xx 아닌 응답이 나오면(복구) 상태 초기화.
+  - 처음 봤을 때 이미 10분+ 지난 오래된 에러는 무시(시작 시 과거에러 스팸 방지).
+
+상태: ~/.claude/state/api-5xx-watcher/<proj>.retry.json
 """
 import json
 import os
 import re
+import shlex
 import subprocess
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 CHAT_ID = "8689118207"
 STATE_DIR = Path.home() / ".claude" / "state" / "api-5xx-watcher"
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
+USERBOT_SESSION = Path.home() / ".claude" / "userbot" / "userbot.session"
+USERBOT_HOST_FILE = Path.home() / ".claude" / "userbot" / "host"
+SEND_BIN = Path(__file__).resolve().parent / "claude-userbot-send"
 ERROR_RE = re.compile(r"API Error:\s*5\d\d")
+CODE_RE = re.compile(r"API Error:\s*(5\d\d)")
+
+DRYRUN = os.environ.get("CLAUDE_5XX_DRYRUN") == "1"  # 발송/알림 대신 stderr 출력
+PAYLOAD = "계속 진행해"
+BACKOFF = [60, 180, 420]   # 재전송 간 대기(초). attempts 인덱스.
+MAX_RETRIES = 3
+STALE_SEC = 600            # 처음 봤을 때 이 이상 지난 에러는 무시
+SKIP = {"progress-updater", "rate-limit-recovery", "daily-research",
+        "control-bot", "watchdog", "bun-ensure", "memory-lifecycle",
+        "resume", "weekly-stability-check", "telegram-healthcheck",
+        "api-5xx-watcher", "usage-daily-report"}
 
 
 def list_services():
-    """active claude-<proj>.service 목록."""
     try:
         out = subprocess.run(
             ["systemctl", "--user", "list-units", "claude-*.service",
@@ -38,13 +68,8 @@ def list_services():
         unit = line.split()[0] if line.strip() else ""
         if unit.startswith("claude-") and unit.endswith(".service"):
             proj = unit[len("claude-"):-len(".service")]
-            # 보조 서비스 제외
-            if proj in {"progress-updater", "rate-limit-recovery",
-                         "daily-research", "control-bot", "watchdog",
-                         "bun-ensure", "memory-lifecycle", "resume",
-                         "weekly-stability-check", "telegram-healthcheck"}:
-                continue
-            names.append(proj)
+            if proj not in SKIP:
+                names.append(proj)
     return names
 
 
@@ -61,7 +86,6 @@ def workingdir(proj):
 
 
 def latest_jsonl(cwd):
-    """cwd 에 해당하는 ~/.claude/projects/<key>/<uuid>.jsonl 중 최신."""
     if not cwd:
         return None
     key = "-" + cwd.lstrip("/").replace("/", "-")
@@ -86,19 +110,145 @@ def load_bot_token(cwd):
     return None
 
 
-def send_alert(token, proj, snippet):
-    m = re.search(r"API Error:\s*(5\d\d)", snippet)
-    code = m.group(1) if m else "5xx"
-    msg = f"[{proj}] API {code} — 재전송 필요"
-    data = urllib.parse.urlencode({
-        "chat_id": CHAT_ID,
-        "text": msg,
-    }).encode()
+def bot_username(token):
+    """토큰 → @username (getMe). 실패 시 None."""
+    url = f"https://api.telegram.org/bot{token}/getMe"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            d = json.loads(r.read().decode("utf-8", errors="ignore"))
+        u = d.get("result", {}).get("username")
+        return ("@" + u) if u else None
+    except Exception:
+        return None
+
+
+def notify(token, text):
+    if DRYRUN:
+        import sys
+        sys.stderr.write(f"[DRYRUN notify] {text}\n")
+        return
+    data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         urllib.request.urlopen(url, data=data, timeout=10).read()
     except Exception:
         pass
+
+
+def do_resend(username):
+    """유저봇으로 PAYLOAD 재주입. (ok, detail) 반환."""
+    if DRYRUN:
+        import sys
+        mode = "local" if USERBOT_SESSION.exists() else "ssh:" + (
+            USERBOT_HOST_FILE.read_text().strip() if USERBOT_HOST_FILE.is_file() else "?")
+        sys.stderr.write(f"[DRYRUN resend] {mode} -> {username} : {PAYLOAD}\n")
+        return True, "DRYRUN"
+    if not SEND_BIN.exists():
+        return False, "claude-userbot-send 없음"
+    if USERBOT_SESSION.exists():
+        cmd = [str(SEND_BIN), username, PAYLOAD]
+    else:
+        host = ""
+        if USERBOT_HOST_FILE.is_file():
+            host = USERBOT_HOST_FILE.read_text(errors="ignore").strip()
+        if not host:
+            return False, "로컬 유저봇 없음 + host 미설정"
+        remote = f"~/dotfiles/bin/claude-userbot-send {shlex.quote(username)} {shlex.quote(PAYLOAD)}"
+        cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host, remote]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+        det = ((r.stderr or "") + (r.stdout or "")).strip()
+        # ssh 원격 셸 init 잡음(예: 'lean-ctx: command not found') 제거
+        det = "\n".join(l for l in det.splitlines()
+                        if "command not found" not in l)[-200:]
+        return (r.returncode == 0), det
+    except Exception as e:
+        return False, str(e)[:200]
+
+
+def load_state(proj):
+    f = STATE_DIR / f"{proj}.retry.json"
+    if f.is_file():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {"active": False, "first_seen_ts": 0.0, "attempts": 0,
+            "last_attempt_ts": 0.0, "gave_up": False}
+
+
+def save_state(proj, st):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    (STATE_DIR / f"{proj}.retry.json").write_text(json.dumps(st))
+
+
+def clear_state(proj):
+    f = STATE_DIR / f"{proj}.retry.json"
+    try:
+        f.unlink()
+    except Exception:
+        pass
+
+
+def parse_ts(rec):
+    t = rec.get("timestamp")
+    if not t:
+        return None
+    try:
+        return datetime.fromisoformat(t.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def is_real_user(d):
+    if not d or d.get("type") != "user":
+        return False
+    c = (d.get("message", {}) or {}).get("content")
+    if isinstance(c, str):
+        return True
+    if isinstance(c, list):
+        for it in c:
+            if isinstance(it, dict):
+                if it.get("type") == "tool_result" or "tool_use_id" in it:
+                    return False
+                if it.get("type") == "text" or "text" in it:
+                    return True
+        return True
+    return False
+
+
+def assistant_text(d):
+    c = (d.get("message", {}) or {}).get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        out = ""
+        for it in c:
+            if isinstance(it, dict) and it.get("type") == "text":
+                out += it.get("text", "")
+        return out
+    return ""
+
+
+def tail_records(jsonl):
+    try:
+        with jsonl.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 1_000_000))
+            raw = f.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+    recs = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            recs.append(json.loads(line))
+        except Exception:
+            continue
+    return recs
 
 
 def process(proj):
@@ -108,55 +258,92 @@ def process(proj):
     jsonl = latest_jsonl(cwd)
     if not jsonl:
         return
-    state_file = STATE_DIR / f"{proj}.last"
-    seeded = state_file.is_file()
-    last_uuid = state_file.read_text().strip() if seeded else ""
-    new_last = last_uuid
-    found_new = False
-    alerts = []
-    try:
-        with jsonl.open("r", errors="ignore") as f:
-            # 첫 시드 (state 파일 없음): 알림 안 보내고 끝까지 스캔만.
-            seen_last = (last_uuid == "")
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                uuid = rec.get("uuid", "")
-                if not seen_last:
-                    if uuid == last_uuid:
-                        seen_last = True
-                    continue
-                # 새 메시지
-                if rec.get("type") == "assistant":
-                    content = rec.get("message", {}).get("content")
-                    text = ""
-                    if isinstance(content, list):
-                        for blk in content:
-                            if isinstance(blk, dict) and blk.get("type") == "text":
-                                text += blk.get("text", "")
-                    elif isinstance(content, str):
-                        text = content
-                    if text and ERROR_RE.search(text):
-                        alerts.append(text)
-                if uuid:
-                    new_last = uuid
-                    found_new = True
-    except Exception:
+    recs = tail_records(jsonl)
+    if not recs:
         return
-    if found_new:
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(new_last)
-    # 시드 첫 실행 (seeded=False) 에는 알림 송신 안 함 — 과거 에러 스팸 방지.
-    if alerts and seeded:
-        token = load_bot_token(cwd)
-        if token:
-            for snippet in alerts:
-                send_alert(token, proj, snippet)
+
+    last_asst = -1
+    for i in range(len(recs) - 1, -1, -1):
+        if recs[i].get("type") == "assistant" and assistant_text(recs[i]):
+            last_asst = i
+            break
+    if last_asst < 0:
+        clear_state(proj)
+        return
+
+    atext = assistant_text(recs[last_asst])
+    tail_5xx = bool(ERROR_RE.search(atext))
+    pending_after = any(is_real_user(recs[j]) for j in range(last_asst + 1, len(recs)))
+
+    st = load_state(proj)
+    now = time.time()
+
+    if not tail_5xx:
+        if st.get("active") and st.get("attempts", 0) > 0 and not st.get("gave_up"):
+            tok = load_bot_token(cwd)
+            if tok:
+                notify(tok, f"[{proj}] 자동 재전송으로 복구됨 ✓")
+        clear_state(proj)
+        return
+
+    # 여기부터 tail 이 5xx
+    m = CODE_RE.search(atext)
+    code = m.group(1) if m else "5xx"
+
+    # 새 incident 시작
+    if not st.get("active"):
+        age = None
+        ats = parse_ts(recs[last_asst])
+        if ats:
+            age = now - ats
+        # 처음 봤는데 이미 오래된 에러 → 무시(시작 시 과거에러 스팸 방지)
+        if age is not None and age > STALE_SEC:
+            save_state(proj, {"active": True, "first_seen_ts": now,
+                              "attempts": MAX_RETRIES, "last_attempt_ts": now,
+                              "gave_up": True})
+            return
+        st = {"active": True, "first_seen_ts": now, "attempts": 0,
+              "last_attempt_ts": 0.0, "gave_up": False}
+        save_state(proj, st)
+
+    if st.get("gave_up"):
+        return
+    if pending_after:
+        return  # 직전 재전송/사용자 메시지 처리 대기 중 → 중복 발송 금지
+
+    attempts = st.get("attempts", 0)
+    if attempts >= MAX_RETRIES:
+        tok = load_bot_token(cwd)
+        if tok:
+            notify(tok, f"[{proj}] API {code} — 자동 재전송 {MAX_RETRIES}회 실패. 수동 재전송 필요.")
+        st["gave_up"] = True
+        save_state(proj, st)
+        return
+
+    wait = BACKOFF[min(attempts, len(BACKOFF) - 1)]
+    ref = st["last_attempt_ts"] if attempts > 0 else st["first_seen_ts"]
+    if now - ref < wait:
+        return  # 백오프 대기 중
+
+    tok = load_bot_token(cwd)
+    username = bot_username(tok) if tok else None
+    if not username:
+        if tok:
+            notify(tok, f"[{proj}] API {code} — 봇 식별 실패, 자동 재전송 불가. 수동 필요.")
+        st["gave_up"] = True
+        save_state(proj, st)
+        return
+
+    ok, detail = do_resend(username)
+    st["attempts"] = attempts + 1
+    st["last_attempt_ts"] = now
+    save_state(proj, st)
+    if ok:
+        notify(tok, f"[{proj}] API {code} — 자동 재전송 {st['attempts']}/{MAX_RETRIES} (계속 진행해)")
+    else:
+        notify(tok, f"[{proj}] API {code} — 자동 재전송 실패({detail or '유저봇 오류'}). 수동 필요.")
+        st["gave_up"] = True
+        save_state(proj, st)
 
 
 def main():
