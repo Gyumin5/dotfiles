@@ -8,42 +8,90 @@
 # 권한: 디렉터리 700, 파일 600.
 #
 # 사용법:
-#   restore-secrets.sh BUNDLE.tar.gz.gpg [--passfile PATH] [--dry-run] [--force]
-#                      [--include-userbot-session]
+#   restore-secrets.sh [BUNDLE.tar.gz.gpg] [--keyword] [--auto-latest]
+#                      [--passfile PATH] [--dry-run] [--force]
+#                      [--include-userbot-session] [--secrets-repo DIR]
+#   --keyword                 키워드→scrypt 파생 패스프레이즈 사용(터미널 입력).
+#                             salt 는 claude-secrets private repo 에서 읽음.
+#   --auto-latest             BUNDLE 생략 시 private repo 에서 이 머신 최신 번들 자동선택
 #   --dry-run                 복원할 파일 목록만 출력
 #   --force                   기존 파일을 백업 없이 덮어씀 (기본은 .pre-restore 백업)
 #   --include-userbot-session raion 등에서 userbot.session 도 강제 복원(기본 제외)
+#   --secrets-repo DIR        private repo 로컬 클론 경로(기본 ~/claude-secrets-repo)
 set -uo pipefail
 
 HOME_DIR="${HOME}"
+BINDIR="$(cd "$(dirname "$0")" && pwd)"
 MACHINE_FILE="$HOME_DIR/.config/claude-machine-id"
-PASSFILE="$HOME_DIR/.config/claude-secrets/passphrase"
+PASS_DIR="$HOME_DIR/.config/claude-secrets"
+PASSFILE="$PASS_DIR/passphrase"
+SECRETS_REPO="$HOME_DIR/claude-secrets-repo"
+SECRETS_URL_FILE="$PASS_DIR/repo-url"
+DEFAULT_SECRETS_URL="git@github.com:Gyumin5/claude-secrets.git"
 DRYRUN=false
 FORCE=false
 INCLUDE_UBS=false
+KEYWORD_MODE=false
+AUTO_LATEST=false
 BUNDLE=""
+TMPPASS=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --passfile) PASSFILE="$2"; shift 2 ;;
+        --keyword) KEYWORD_MODE=true; shift ;;
+        --auto-latest) AUTO_LATEST=true; shift ;;
+        --secrets-repo) SECRETS_REPO="$2"; shift 2 ;;
         --dry-run) DRYRUN=true; shift ;;
         --force) FORCE=true; shift ;;
         --include-userbot-session) INCLUDE_UBS=true; shift ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         -*) echo "unknown arg: $1" >&2; exit 2 ;;
         *) BUNDLE="$1"; shift ;;
     esac
 done
 
-[ -n "$BUNDLE" ] && [ -f "$BUNDLE" ] || { echo "번들 경로 필요(존재해야 함): $BUNDLE" >&2; exit 2; }
 command -v gpg >/dev/null || { echo "gpg 없음." >&2; exit 1; }
-[ -s "$PASSFILE" ] || { echo "패스프레이즈 파일 없음: $PASSFILE (--passfile 로 지정, 비번관리자에서 복원)" >&2; exit 1; }
-
 MACHINE="$(cat "$MACHINE_FILE" 2>/dev/null || echo unknown)"
 
 TARPLAIN="$(mktemp "${TMPDIR:-/tmp}/cs-r-XXXXXX.tar.gz")"
-cleanup() { rm -f "$TARPLAIN"; }
+cleanup() { rm -f "$TARPLAIN" "${TMPPASS:-}"; }
 trap cleanup EXIT
+
+# private repo 보장 (clone 없으면 clone)
+ensure_secrets_repo() {
+    local url="$DEFAULT_SECRETS_URL"
+    [ -s "$SECRETS_URL_FILE" ] && url="$(cat "$SECRETS_URL_FILE")"
+    if [ ! -d "$SECRETS_REPO/.git" ]; then
+        echo "claude-secrets repo clone: $url → $SECRETS_REPO"
+        git clone "$url" "$SECRETS_REPO" || { echo "clone 실패." >&2; return 1; }
+    else
+        git -C "$SECRETS_REPO" pull --ff-only 2>&1 | tail -1 || true
+    fi
+}
+
+# --auto-latest: repo 에서 이 머신 최신 번들 선택
+if [ "$AUTO_LATEST" = true ] && [ -z "$BUNDLE" ]; then
+    ensure_secrets_repo || exit 1
+    BUNDLE="$(ls -t "$SECRETS_REPO"/bundles/claude-secrets-"${MACHINE}"-*.tar.gz.gpg 2>/dev/null | head -1)"
+    [ -n "$BUNDLE" ] || { echo "repo 에 ${MACHINE} 번들 없음." >&2; exit 1; }
+    echo "자동선택 번들: $BUNDLE"
+fi
+
+[ -n "$BUNDLE" ] && [ -f "$BUNDLE" ] || { echo "번들 경로 필요(존재해야 함): '$BUNDLE'  (--auto-latest 로 자동선택 가능)" >&2; exit 2; }
+
+# 패스프레이즈 준비: --keyword 면 salt 로 파생, 아니면 파일
+if [ "$KEYWORD_MODE" = true ]; then
+    ensure_secrets_repo || exit 1
+    SALT="$SECRETS_REPO/salt"
+    [ -s "$SALT" ] || { echo "salt 없음: $SALT" >&2; exit 1; }
+    TMPPASS="$(mktemp "${TMPDIR:-/tmp}/cs-rpass-XXXXXX")"; chmod 600 "$TMPPASS"
+    echo "키워드 입력으로 패스프레이즈 파생(터미널):"
+    "$BINDIR/secrets-keyderive" --salt "$SALT" --out "$TMPPASS" \
+        || { echo "키워드 파생 실패." >&2; exit 1; }
+    PASSFILE="$TMPPASS"
+fi
+[ -s "$PASSFILE" ] || { echo "패스프레이즈 없음: $PASSFILE (--passfile 또는 --keyword)" >&2; exit 1; }
 
 gpg --batch --yes --pinentry-mode loopback --passphrase-file "$PASSFILE" \
     --decrypt -o "$TARPLAIN" "$BUNDLE" 2>/dev/null \

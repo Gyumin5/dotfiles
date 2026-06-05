@@ -260,10 +260,17 @@ if [ "$MACHINE_ID" = "raion" ] && [ -d "$DOTFILES_DIR/raion/todo-sync" ]; then
   echo "[install] raion todo 자산 설치 완료. cron 등록은 텔레그램 세션에서 'todo 스케줄 켜줘'."
 fi
 
-# 비밀 복원 (봇토큰/유저봇/컨트롤봇) — 환경변수 CLAUDE_SECRETS_BUNDLE 에 backup-secrets.sh
-# 번들 경로를 주면 복원. 번들은 repo 밖 암호화 백업이라 install 만으론 안 옴(설계 의도).
-# 없으면 생략(실패 안 함). 패스프레이즈는 CLAUDE_SECRETS_PASSFILE 또는 비번관리자에서.
-if [ -n "${CLAUDE_SECRETS_BUNDLE:-}" ] && [ -f "${CLAUDE_SECRETS_BUNDLE}" ]; then
+# 비밀 복원 (봇토큰/유저봇/컨트롤봇).
+# 권장(키워드 모드): CLAUDE_SECRETS_KEYWORD=1 → PRIVATE repo claude-secrets 에서
+#   최신 번들 자동선택 + 키워드 터미널 입력으로 복원(restore 가 repo 자동 clone).
+# legacy(번들 경로): CLAUDE_SECRETS_BUNDLE 에 번들 경로. 패스프레이즈는
+#   CLAUDE_SECRETS_PASSFILE 또는 비번관리자에서.
+# 없으면 생략(실패 안 함).
+if [ -n "${CLAUDE_SECRETS_KEYWORD:-}" ] && [ -x "$DOTFILES_DIR/bin/restore-secrets.sh" ]; then
+  echo "[install] 비밀 복원(키워드 모드, private repo claude-secrets 최신 번들):"
+  "$DOTFILES_DIR/bin/restore-secrets.sh" --keyword --auto-latest \
+    || echo "[install] 비밀 복원 실패 — restore-secrets.sh --keyword --auto-latest 수동 실행 필요"
+elif [ -n "${CLAUDE_SECRETS_BUNDLE:-}" ] && [ -f "${CLAUDE_SECRETS_BUNDLE}" ]; then
   if [ -x "$DOTFILES_DIR/bin/restore-secrets.sh" ]; then
     echo "[install] 비밀 번들 복원: $CLAUDE_SECRETS_BUNDLE"
     "$DOTFILES_DIR/bin/restore-secrets.sh" "$CLAUDE_SECRETS_BUNDLE" \
@@ -271,8 +278,9 @@ if [ -n "${CLAUDE_SECRETS_BUNDLE:-}" ] && [ -f "${CLAUDE_SECRETS_BUNDLE}" ]; the
       || echo "[install] 비밀 복원 실패 — restore-secrets.sh 수동 실행 필요"
   fi
 else
-  echo "[install] 비밀 번들 미지정 — 세션 봇/유저봇 토큰 복원 안 됨."
-  echo "          복구: bin/restore-secrets.sh <번들> (패스프레이즈는 비번관리자) → claude login."
+  echo "[install] 비밀 미복원 — 세션 봇/유저봇 토큰 없음."
+  echo "          복구(권장): CLAUDE_SECRETS_KEYWORD=1 ~/dotfiles/install.sh  (키워드 입력)"
+  echo "          또는: bin/restore-secrets.sh --keyword --auto-latest → claude login."
 fi
 
 echo ""
