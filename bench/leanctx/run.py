@@ -85,6 +85,8 @@ def run_one(task, arm, rep):
     prompt = task["prompt"] + PROMPT_SUFFIX
     cmd = [CLAUDE, "-p", prompt, "--output-format", "json",
            "--max-budget-usd", MAX_BUDGET,
+           "--dangerously-skip-permissions",
+           "--add-dir", "/home/gmoh/dotfiles", "--add-dir", "/home/gmoh/raion",
            "--strict-mcp-config", "--mcp-config", a["mcp"]]
     t0 = time.time()
     try:
