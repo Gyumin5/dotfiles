@@ -387,21 +387,9 @@ def read_statusline():
         p5, p7 = eff_pct(rl5), eff_pct(rl7)
         r5 = _fmt_reset(datetime.fromtimestamp(rl5.get("resets_at", 0), tz=kst)) if rl5.get("resets_at") else "?"
         r7 = _fmt_reset(datetime.fromtimestamp(rl7.get("resets_at", 0), tz=kst)) if rl7.get("resets_at") else "?"
-        # 로그인 계정 = ~/.claude.json 의 라이브 값(현재 인증 주체). 캐시에 박힌
-        # account 와 다르면 캐시(=위 5h/7d)는 아직 구계정 수치라는 신호.
-        live_acct = None
-        try:
-            cj = json.loads((Path.home() / ".claude.json").read_text())
-            live_acct = (cj.get("oauthAccount") or {}).get("emailAddress")
-        except Exception:
-            pass
-        acct_line = f"계정: {live_acct or '?'}"
-        if live_acct and d.get("account") and d.get("account") != live_acct:
-            acct_line += " (위 사용량은 구계정 캐시, 갱신 대기)"
         usage_lines = [
             f"5h: {p5 if p5 is not None else '?'}% (리셋 {r5})",
             f"7d: {p7 if p7 is not None else '?'}% (리셋 {r7})",
-            acct_line,
         ]
 
         health_lines = ["", "세션 / 텔레그램봇:"]
