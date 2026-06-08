@@ -85,6 +85,29 @@ def get_todos(all_=True):
     return json.loads(out)
 
 
+def search_todos(query, all_=False):
+    """제목·메모·태그 전문검색(todoctl search → FTS5/LIKE). 실패 시 빈 리스트."""
+    args = ["search", query, "--json"] + (["--all"] if all_ else [])
+    rc, out, err = todoctl(args)
+    if rc != 0:
+        return []
+    try:
+        return json.loads(out)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def get_tags():
+    """[{tag, open, total}] (todoctl tags --json). 실패 시 빈 리스트."""
+    rc, out, err = todoctl(["tags", "--json"])
+    if rc != 0:
+        return []
+    try:
+        return json.loads(out)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ── 알림 스누즈 상태 (리마인더만 미룸 — 마감일과 별개) ──────────────
 # 마감일(due_at)은 todoctl/DB 가 진실원본. 스누즈는 '언제까지 리마인더를 끌지'
 # 라는 운영 메타데이터일 뿐이라 DB 를 안 건드리고 사이드카 JSON 에 둔다.

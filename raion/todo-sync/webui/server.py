@@ -43,16 +43,43 @@ def load_or_make_token():
 TOKEN = load_or_make_token()
 
 
+def load_vocab():
+    """config.json 의 사전 정의 태그 어휘(없으면 기본값)."""
+    try:
+        with open(os.path.join(os.path.dirname(TODOCTL), "config.json")) as f:
+            v = json.load(f).get("tags")
+        if isinstance(v, list) and v:
+            return v
+    except Exception:
+        pass
+    return ["긴급", "중요", "개발", "회사", "인사", "회의", "개인", "기타"]
+
+
+VOCAB = load_vocab()
+
+
 def run_todoctl(args):
     """todoctl 을 argv 배열로만 호출. shell 미사용. 결과 (rc, stdout, stderr)."""
     try:
         p = subprocess.run(
             [sys.executable, TODOCTL, *args],
             capture_output=True, text=True, timeout=15,
+            cwd=os.path.dirname(TODOCTL),  # todoctl 은 상대경로 todo.db → CWD 고정
         )
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         return 1, "", "timeout"
+
+
+def slim_one(t):
+    """무거운 events 배열을 떼고 note 이벤트만 notelog(최근 8)로 남김."""
+    ev = t.pop("events", None) or []
+    notes = [
+        {"ts": e.get("ts"), "detail": e.get("detail")}
+        for e in ev if e.get("event") == "note"
+    ]
+    t["notelog"] = notes[-8:]
+    return t
 
 
 PAGE = """<!DOCTYPE html>
@@ -70,6 +97,18 @@ PAGE = """<!DOCTYPE html>
  .addrow2{display:flex;gap:10px}
  .add input,.add select,.add button{font-size:17px}
  .add input[type=text]{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:#0c0e13;color:var(--tx)}
+ .searchbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+ .searchbar input{flex:1;min-width:0;font-size:17px;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:#0c0e13;color:var(--tx)}
+ .searchbar button{padding:0 16px;min-height:48px}
+ .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px}
+ .chip{font-size:14px;padding:8px 13px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--mut);cursor:pointer;min-height:0}
+ .chip.on{background:#22314f;color:#cfe0ff;border-color:#3a4d78}
+ .picklab{font-size:13px;color:var(--mut);margin:2px 2px 2px}
+ .pickchips{display:flex;flex-wrap:wrap;gap:8px}
+ .pick{font-size:15px;padding:9px 14px;border-radius:999px;border:1px solid var(--line);background:#0c0e13;color:var(--mut);cursor:pointer;min-height:0}
+ .pick.on{background:#1d3a2a;color:#9ff0c0;border-color:#2f6b4a}
+ .tags{margin-top:7px;display:flex;flex-wrap:wrap;gap:6px}
+ .tag{font-size:12.5px;padding:3px 9px;border-radius:999px;background:#1d2740;color:#9fc0ff;border:1px solid #2c3a5c}
  .add input[type=date]{flex:1;min-width:0;padding:13px;border-radius:12px;border:1px solid var(--line);background:#0c0e13;color:var(--tx)}
  select{padding:13px;border-radius:12px;border:1px solid var(--line);background:#0c0e13;color:var(--tx)}
  button{font-size:17px;padding:14px 18px;border-radius:12px;border:1px solid var(--line);background:#22314f;color:#cfe0ff;font-weight:600;min-height:50px;cursor:pointer}
@@ -108,12 +147,15 @@ PAGE = """<!DOCTYPE html>
  <h1>업무 todo</h1>
  <div class="add">
   <input id="t" type="text" placeholder="할 일 추가…" autocomplete="off">
+  <div class="picklab">태그(여러 개 선택 가능)</div>
+  <div id="addtags" class="pickchips"></div>
   <div class="addrow2">
-   <input id="due" type="date">
-   <select id="prio"><option value="med">보통</option><option value="high">높음</option><option value="low">낮음</option></select>
+   <input id="due" type="text" inputmode="numeric" maxlength="6" placeholder="마감 yymmdd (예: 260609, 비우면 없음)">
    <button onclick="add()">추가</button>
   </div>
  </div>
+ <div class="searchbar"><input id="q" type="search" placeholder="🔍 검색 — 제목·메모·태그" autocomplete="off"><button class="ghost" id="qx" onclick="clearSearch()" style="display:none">✕</button></div>
+ <div id="chips" class="chips"></div>
  <div class="secbar"><button class="ghost" id="caltoggle" onclick="toggleCal()">📅 마감 일정 보기 ▾</button></div>
  <div id="agenda" style="display:none"></div>
  <div class="secbar"><h2>진행 중</h2><button class="ghost" onclick="load()">새로고침</button></div>
@@ -124,6 +166,14 @@ PAGE = """<!DOCTYPE html>
 <div id="msg"></div>
 <script>
 const CSRF="1";
+const TAGS=__TAGVOCAB__;
+function urg(t){const a=String(t.tags||'').split(',');return a.includes('긴급')?'긴급':a.includes('중요')?'중요':'';}
+function buildAddTags(){
+ const box=document.getElementById('addtags');box.innerHTML='';
+ TAGS.forEach(tg=>{const c=el('button','pick','#'+tg);c.dataset.tag=tg;c.onclick=()=>c.classList.toggle('on');box.appendChild(c);});
+}
+function selectedAddTags(){return Array.from(document.querySelectorAll('#addtags .pick.on')).map(c=>c.dataset.tag);}
+function clearAddTags(){document.querySelectorAll('#addtags .pick.on').forEach(c=>c.classList.remove('on'));}
 function toast(s){const m=document.getElementById('msg');m.textContent=s;m.classList.add('show');setTimeout(()=>m.classList.remove('show'),1800);}
 async function api(path,method,body){
  const o={method,headers:{'X-Todo-CSRF':CSRF}};
@@ -134,14 +184,23 @@ async function api(path,method,body){
 }
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e;}
 function card(t){
- const d=el('div','item'+(t.priority==='high'?' high':'')+(t.status==='done'?' done':''));
+ const u=urg(t);
+ const d=el('div','item'+(u==='긴급'?' high':'')+(t.status==='done'?' done':''));
  const row=el('div','row');
- const ti=el('div','title',(t.priority==='high'?'★ ':'')+t.title);
+ const ti=el('div','title',(u==='긴급'?'🔴 ':u==='중요'?'⭐ ':'')+t.title);
  row.appendChild(ti);d.appendChild(row);
  let meta='#'+t.task_id+' · '+t.status;
  if(t.due_at)meta+=' · 기한 '+t.due_at;
  if(t.source)meta+=' · '+t.source;
  d.appendChild(el('div','meta',meta));
+ // 태그 칩(누르면 그 태그로 필터).
+ if(t.tags){
+  const tw=el('div','tags');
+  String(t.tags).split(',').filter(Boolean).forEach(tag=>{
+   const e=el('span','tag','#'+tag);e.onclick=()=>setTag(tag);tw.appendChild(e);
+  });
+  d.appendChild(tw);
+ }
  // 설명(add 시 입력한 notes 필드) — 길면 3줄로 접고 더보기.
  if(t.notes){
   const desc=el('div','desc clip',t.notes);
@@ -178,21 +237,61 @@ function card(t){
  d.appendChild(acts);
  return d;
 }
-let _todos=[];
+let _todos=[];        // /api/list 전체
+let _search=null;     // 검색 중이면 결과 배열, 아니면 null
+let _filterTag=null;  // 선택된 태그(null=전체)
 async function load(){
- const data=await api('/api/list','GET');
- _todos=data;
+ _todos=await api('/api/list','GET');
+ renderAll();
+}
+function setTag(tag){_filterTag=(_filterTag===tag?null:tag);renderAll();}
+function passTag(t){
+ if(!_filterTag)return true;
+ return String(t.tags||'').split(',').filter(Boolean).includes(_filterTag);
+}
+function buildChips(){
+ const box=document.getElementById('chips');box.innerHTML='';
+ const cnt={};
+ _todos.filter(t=>t.status!=='done').forEach(t=>
+  String(t.tags||'').split(',').filter(Boolean).forEach(tg=>cnt[tg]=(cnt[tg]||0)+1));
+ const tags=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]||(a<b?-1:1));
+ if(!tags.length){return;}
+ const all=el('button','chip'+(_filterTag===null?' on':''),'전체');
+ all.onclick=()=>{_filterTag=null;renderAll();};box.appendChild(all);
+ tags.forEach(tg=>{
+  const c=el('button','chip'+(_filterTag===tg?' on':''),'#'+tg+' '+cnt[tg]);
+  c.onclick=()=>setTag(tg);box.appendChild(c);
+ });
+}
+function renderAll(){
+ buildChips();
+ const src=(_search!==null?_search:_todos).filter(passTag);
  const A=document.getElementById('active'),D=document.getElementById('done');
  A.innerHTML='';D.innerHTML='';
- const act=data.filter(t=>t.status!=='done'),dn=data.filter(t=>t.status==='done');
- if(!act.length)A.appendChild(el('div','meta','(없음)'));
+ const act=src.filter(t=>t.status!=='done'),dn=src.filter(t=>t.status==='done');
+ if(!act.length)A.appendChild(el('div','meta',_search!==null?'(검색 결과 없음)':'(없음)'));
  act.forEach(t=>A.appendChild(card(t)));
- // 완료: 최근 15개만, 기본 접힘
  dn.slice(-15).reverse().forEach(t=>D.appendChild(card(t)));
  const tg=document.getElementById('donetoggle');
- const more=dn.length>15?(' (최근 15)'):'';
- tg.textContent='완료 '+dn.length+'개'+more+(D.style.display==='none'?' ▾':' ▴');
+ const more=dn.length>15?' (최근 15)':'';
+ tg.textContent=(_search!==null?'검색·완료 ':'완료 ')+dn.length+'개'+more+(D.style.display==='none'?' ▾':' ▴');
  if(document.getElementById('agenda').style.display!=='none')buildAgenda();
+}
+let _qtimer=null;
+function onSearch(){
+ const q=document.getElementById('q').value.trim();
+ document.getElementById('qx').style.display=q?'block':'none';
+ clearTimeout(_qtimer);
+ _qtimer=setTimeout(async()=>{
+  if(!q){_search=null;renderAll();return;}
+  try{_search=await api('/api/search?q='+encodeURIComponent(q),'GET');}
+  catch(e){_search=[];}
+  renderAll();
+ },250);
+}
+function clearSearch(){
+ document.getElementById('q').value='';_search=null;
+ document.getElementById('qx').style.display='none';renderAll();
 }
 // ── 마감 일정 뷰: 마감일 있는 todo 를 날짜별로(지연 + 앞으로 21일) ──
 const WD=['일','월','화','수','목','금','토'];
@@ -204,7 +303,8 @@ function toggleCal(){
  if(show)buildAgenda();
 }
 function agItem(t){
- const e=el('div','aitem'+(t.priority==='high'?' high':''),(t.priority==='high'?'★ ':'')+'#'+t.task_id+' '+t.title);
+ const u=urg(t);
+ const e=el('div','aitem'+(u==='긴급'?' high':''),(u==='긴급'?'🔴 ':u==='중요'?'⭐ ':'')+'#'+t.task_id+' '+t.title);
  e.onclick=()=>{const A=document.getElementById('active');A.scrollIntoView({behavior:'smooth',block:'start'});};
  return e;
 }
@@ -233,14 +333,28 @@ function toggleDone(){
  D.style.display=(D.style.display==='none')?'block':'none';
  load();
 }
+function parseDue(v){
+ v=(v||'').replace(/[^0-9]/g,'');
+ if(!v)return null;            // 빈 값 = 마감 없음
+ if(v.length!==6)return undefined;   // 형식 오류
+ const mm=+v.slice(2,4),dd=+v.slice(4,6);
+ if(mm<1||mm>12||dd<1||dd>31)return undefined;
+ return '20'+v.slice(0,2)+'-'+v.slice(2,4)+'-'+v.slice(4,6);
+}
 async function add(){
- const t=document.getElementById('t'),due=document.getElementById('due'),prio=document.getElementById('prio');
+ const t=document.getElementById('t'),due=document.getElementById('due');
  if(!t.value.trim())return;
- await api('/api/add','POST',{title:t.value.trim(),due:due.value||null,prio:prio.value});
- t.value='';due.value='';toast('추가됨');load();
+ const dv=parseDue(due.value);
+ if(dv===undefined){toast('마감은 yymmdd 6자리 (예: 260609)');return;}
+ const tags=selectedAddTags();
+ await api('/api/add','POST',{title:t.value.trim(),due:dv,tags:tags.length?tags.join(','):null});
+ t.value='';due.value='';clearAddTags();toast('추가됨');load();
 }
 async function act(a,id){await api('/api/'+a,'POST',{id});toast(a==='done'?'완료':'되돌림');load();}
 async function note(id,text){await api('/api/note','POST',{id,text});toast('메모 추가');load();}
+document.getElementById('q').addEventListener('input',onSearch);
+document.getElementById('t').addEventListener('keydown',e=>{if(e.key==='Enter')add();});
+buildAddTags();
 load();
 </script></body></html>
 """
@@ -359,7 +473,9 @@ class H(BaseHTTPRequestHandler):
                 return self._serve_html(LOGIN_PAGE.replace("__ERR__", ""))
             return self._need_auth()
         if self.path == "/" or self.path.startswith("/?"):
-            return self._serve_html(PAGE)
+            return self._serve_html(
+                PAGE.replace("__TAGVOCAB__", json.dumps(VOCAB, ensure_ascii=False))
+            )
         if self.path == "/api/list":
             rc, out, err = run_todoctl(["json", "--all"])
             if rc != 0:
@@ -371,19 +487,20 @@ class H(BaseHTTPRequestHandler):
             # 페이로드 경량화: 무거운 events 배열은 떼되, note(메모) 이벤트만 최근 8개
             # 추려 notelog 로 실어 UI에 표시. 완료는 최근 30개만 → 응답 크기 고정.
             active = [t for t in data if t.get("status") != "done"]
-            done = [t for t in data if t.get("status") == "done"]
-            done = done[-30:]
-            slim = []
-            for t in active + done:
-                ev = t.pop("events", None) or []
-                notes = [
-                    {"ts": e.get("ts"), "detail": e.get("detail")}
-                    for e in ev
-                    if e.get("event") == "note"
-                ]
-                t["notelog"] = notes[-8:]
-                slim.append(t)
-            return self._json(200, slim)
+            done = [t for t in data if t.get("status") == "done"][-30:]
+            return self._json(200, [slim_one(t) for t in active + done])
+        if self.path.startswith("/api/search"):
+            q = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].strip()
+            if not q or len(q) > 100:
+                return self._json(200, [])
+            rc, out, err = run_todoctl(["search", q, "--json", "--all"])
+            if rc != 0:
+                return self._json(500, {"error": err})
+            try:
+                data = json.loads(out)
+            except Exception:
+                return self._json(500, {"error": "json parse"})
+            return self._json(200, [slim_one(t) for t in data])
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -412,6 +529,9 @@ class H(BaseHTTPRequestHandler):
             prio = body.get("prio")
             if prio in PRIO_OK:
                 args += ["--prio", prio]
+            tags = body.get("tags")
+            if tags and isinstance(tags, str) and len(tags) <= 200:
+                args += ["--tags", tags]
             args += ["--source", "webui"]
             rc, out, err = run_todoctl(args)
             return self._json(200 if rc == 0 else 500, {"out": out, "err": err})
