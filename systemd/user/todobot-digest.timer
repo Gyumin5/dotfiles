@@ -1,0 +1,10 @@
+[Unit]
+Description=TODOBot 마감 리마인더 타이머 (평일 09:00·13:30 KST)
+
+[Timer]
+OnCalendar=Mon-Fri 09:00 KST
+OnCalendar=Mon-Fri 13:30 KST
+Persistent=true
+
+[Install]
+WantedBy=timers.target

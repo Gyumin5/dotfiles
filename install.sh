@@ -253,11 +253,29 @@ if [ "$MACHINE_ID" = "raion" ] && [ -d "$DOTFILES_DIR/raion/todo-sync" ]; then
   cp -n "$DOTFILES_DIR/raion/todo-sync/config.json" "$TODO_DIR/"
   cp    "$DOTFILES_DIR/raion/todo-sync/RUNBOOK.md"  "$TODO_DIR/" 2>/dev/null || true
   cp    "$DOTFILES_DIR"/raion/todo-sync/prompts/*.txt "$TODO_DIR/prompts/" 2>/dev/null || true
+  # TODOBot 코드(전용 텔레그램 봇: 마감 리마인더 + 완료/스누즈/일정조정 리스너).
+  # 코드는 source-of-truth=repo 이므로 덮어씀. 비밀/상태(bot.token,bot.chat_id,snooze.json)는
+  # 운영경로에만 있고 git 제외(repo 의 bot/ 엔 .py 만 존재).
+  mkdir -p "$TODO_DIR/bot"
+  cp "$DOTFILES_DIR"/raion/todo-sync/bot/*.py "$TODO_DIR/bot/" 2>/dev/null || true
   python3 -m pip install --user --quiet msal requests 2>/dev/null || true
   [ -f "$TODO_DIR/todo.db" ] || python3 "$TODO_DIR/todoctl.py" init 2>/dev/null || true
   [ -f "$TODO_DIR/last_check.txt" ] || date -u +%FT%TZ > "$TODO_DIR/last_check.txt"
   chmod 700 "$TODO_DIR"
   echo "[install] raion todo 자산 설치 완료. cron 등록은 텔레그램 세션에서 'todo 스케줄 켜줘'."
+
+  # TODOBot 서비스/타이머 enable (유닛은 위 systemd 블록에서 이미 배포됨).
+  # 봇 토큰/chat_id 가 있을 때만 — 없으면 기동 실패하므로 생략.
+  if [ -f "$TODO_DIR/bot.token" ] && [ -f "$TODO_DIR/bot.chat_id" ]; then
+    systemctl --user enable --now todobot-listener.service 2>/dev/null \
+      && echo "[install]   enabled todobot-listener.service" \
+      || echo "[install]   WARN: todobot-listener enable 실패"
+    systemctl --user enable --now todobot-digest.timer 2>/dev/null \
+      && echo "[install]   enabled todobot-digest.timer" \
+      || echo "[install]   WARN: todobot-digest.timer enable 실패"
+  else
+    echo "[install]   TODOBot 토큰 없음 → 리스너/타이머 enable 생략. BotFather 토큰 저장 후 재실행."
+  fi
 fi
 
 # 비밀 복원 (봇토큰/유저봇/컨트롤봇).

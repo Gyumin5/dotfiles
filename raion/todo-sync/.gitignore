@@ -1,0 +1,13 @@
+# 운영 비밀·상태 (절대 커밋 금지)
+bot.token
+bot.chat_id
+bot/snooze.json
+bot/__pycache__/
+__pycache__/
+# 운영 DB·뷰·체크포인트 (operational only)
+todo.db
+todo.db-wal
+todo.db-shm
+todo.md
+last_check.txt
+*.tmp

@@ -1,0 +1,8 @@
+[Unit]
+Description=TODOBot 마감 리마인더 발송 (oneshot)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/gmoh/raion/todo-sync/bot
+ExecStart=/usr/bin/python3 /home/gmoh/raion/todo-sync/bot/notify.py

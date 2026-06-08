@@ -1,0 +1,13 @@
+[Unit]
+Description=TODOBot 리스너 (명령/완료·스누즈 버튼 long-poll)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/gmoh/raion/todo-sync/bot
+ExecStart=/usr/bin/python3 /home/gmoh/raion/todo-sync/bot/listener.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
