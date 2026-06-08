@@ -522,6 +522,85 @@ def select_roles(task, args, run_dir):
     return ["debater", "critic"], "default"
 
 
+# --- PROVIDER 헬스 진단 (2026-06-08) ---
+# arbiter(codex)가 죽어도 떠야 하므로 per-provider raw 파일을 독립 스캔한다.
+# 어느 AI가 / 왜 / 해결법을 사람이 바로 알 수 있게 결과에 같이 출력.
+import re as _re_health
+
+_HEALTH_SIGS = [
+    (r"invalid_grant|reauth|re-?authenticate|not logged in|로그인 필요|unauthor|\b401\b|403\b|permission denied",
+     "인증 만료/실패", "REAUTH"),
+    (r"authentication timed out|auth[^\n]{0,20}tim(e|ed)\s?out",
+     "인증 타임아웃", "REAUTH"),
+    (r"\b429\b|RESOURCE_EXHAUSTED|quota|rate.?limit|too many requests",
+     "쿼터/레이트리밋", "쿼터·레이트리밋 — 잠시 후 재시도(공유 계정 한도 가능)."),
+    (r"tim(e|ed)\s?out|timeout|deadline exceeded",
+     "타임아웃", "네트워크/일시 hang — 재시도, 반복되면 재인증."),
+    (r"JSON parse failed|could not parse|parse error",
+     "출력 파싱 실패", "JSON 아닌 출력 — 일시 이상, 재시도."),
+]
+_REAUTH_FIX = {
+    "gemini": "gemini(agy/antigravity) 재인증: 터미널에서 재로그인. invalid_grant 면 ~/.config/gcloud 잔재 정리 후 재로그인.",
+    "codex": "codex 재로그인 필요(codex CLI 재인증). ※ arbiter=codex — codex 죽으면 최종 정리(아비터) 불가하니 우선 복구.",
+    "claude": "claude(격리 HOME /home/gmoh/.claude-iso) 인증/플러그인 점검.",
+}
+
+
+def _scan_raw_for_cause(run_dir, agent):
+    """해당 agent 의 모든 raw 파일을 합쳐 첫 매칭 시그니처 반환. (label, fix) 또는 None."""
+    import glob as _glob
+    texts = []
+    pats = [str(run_dir / f"*.{agent}.raw.txt")]
+    if agent == "codex":
+        pats.append(str(run_dir / "arbiter.raw.txt"))
+        pats.append(str(run_dir / "planner.raw.txt"))
+    for pat in pats:
+        for fp in _glob.glob(pat):
+            try:
+                texts.append(open(fp, encoding="utf-8", errors="ignore").read())
+            except Exception:
+                pass
+    blob = "\n".join(texts)
+    if not blob.strip():
+        return None
+    for rx, label, fix in _HEALTH_SIGS:
+        if _re_health.search(rx, blob, _re_health.IGNORECASE):
+            resolved = _REAUTH_FIX.get(agent, "재인증/재시도 필요.") if fix == "REAUTH" else fix
+            return (label, resolved)
+    return None
+
+
+def provider_health_lines(run_dir, all_outputs, arb=None):
+    """provider별 ok/fail + 실패 원인·해결법. 문제 있을 때만 라인 반환."""
+    stats = {}
+    for o in all_outputs:
+        a = o.get("_agent")
+        if not a or a == "arbiter":
+            continue
+        s = stats.setdefault(a, [0, 0])
+        s[1 if "_error" in o else 0] += 1
+    lines = []
+    for agent in sorted(stats):
+        ok, fail = stats[agent]
+        if fail == 0:
+            continue
+        cause = _scan_raw_for_cause(run_dir, agent)
+        if cause:
+            label, fix = cause
+            lines.append(f"  {agent}: {label} ({ok}ok/{fail}fail) → {fix}")
+        else:
+            lines.append(f"  {agent}: 실패 ({ok}ok/{fail}fail) 원인 불명 → raw 확인: {run_dir}/*.{agent}.raw.txt")
+    # arbiter(codex) 별도 강조
+    if arb is not None and isinstance(arb, dict) and "_error" in arb:
+        cause = _scan_raw_for_cause(run_dir, "codex")
+        fix = cause[1] if cause else _REAUTH_FIX["codex"]
+        lab = cause[0] if cause else arb.get("_error", "실패")
+        lines.append(f"  ARBITER(codex): {lab} → {fix}")
+    if lines:
+        return ["[PROVIDER 헬스] 일부 AI 실패 — 원인·해결:"] + lines
+    return []
+
+
 def main():
     ap = argparse.ArgumentParser(description="ai-debate: 멀티 AI 합의 토론")
     ap.add_argument("task", help="토론할 task")
@@ -681,6 +760,8 @@ def main():
     success_calls = sum(1 for o in all_outputs if "_error" not in o)
     if expected_round_calls > 0 and success_calls * 3 < expected_round_calls * 2:
         print(f"ERROR: 성공 콜 {success_calls}/{expected_round_calls} < 2/3. arbiter 건너뛰고 실패 종료.", file=sys.stderr)
+        for hl in provider_health_lines(run_dir, all_outputs, None):
+            print(hl, file=sys.stderr)
         (run_dir / "final_result.json").write_text(json.dumps({
             "run_id": run_id, "run_dir": str(run_dir),
             "rounds_done": rounds_done, "consensus_reached": False,
@@ -728,6 +809,8 @@ def main():
     participants = " | ".join(f"{a}={ok}ok/{fail}fail" for a, (ok, fail) in sorted(agent_stats.items())) or "-"
     _p(f"agents: {participants}")
     _p(f"artifacts={run_dir}")
+    for hl in provider_health_lines(run_dir, all_outputs, arb):
+        _p(hl)
     _p()
 
     # 라운드별 요약. 무옵션(legacy)이면 기존 per-agent 라벨 유지, 동적이면 역할별 집계.
@@ -763,6 +846,8 @@ def main():
     # arbiter 최종 결정
     if "_error" in arb:
         _p(f"ARBITER FAILED: {arb['_error']}")
+        for hl in provider_health_lines(run_dir, all_outputs, arb):
+            _p(hl)
         return
     _p("--- ARBITER (codex) ---")
     fd = arb.get("final_decision", "(no decision)")
