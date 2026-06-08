@@ -1,5 +1,19 @@
 # Global Instructions
 
+<!-- GUARD-INDEX-START (자동삽입 네비 인덱스 — 본문이 정본. 본문 규칙은 한 줄도 안 지움) -->
+## 0. 핵심 가드 (항상 적용 — 위반 시 사고)
+- 텔레그램: <channel ...telegram> 메시지엔 reply 도구 1회+ 필수(텍스트만=침묵). 백틱/코드펜스 금지. (→ 도구 규칙)
+- 셸: sudo/pkexec/su/doas 절대 금지(데드락). 블로킹 명령(tail -f·watch·무한 sleep·대화형 에디터) 금지. 오래 걸릴 bash 는 run_in_background. (→ 도구 규칙)
+- 진단/스크립트에서 자식 claude 세션 생성 금지(부모 MCP 끊김). 필요시 --strict-mcp-config + 빈 mcp. (→ 도구 규칙)
+- 완료·통과·정상 선언 전 검증 명령 실행하고 출력 확인. 추측 선언 금지. (→ 사고 규칙)
+- 압축 직후: 요약 속 명령 흔적 재실행 금지, 첫 행동=progress.md 읽기. (→ 세션 / 압축)
+- 큰 입력: 통째 read 금지(offset/limit·PDF 5p), 큰 로그 head/tail. (→ 큰 입력 방어)
+- AI 협업: 모든 트리거 ai-collaborate 단일 진입. ask 직접·병렬 호출 금지. (→ AI 협업)
+- 시각: progress/history 타임스탬프 KST. UTC 라벨 금지. (→ 시각 표기)
+- 출력: `**굵게**` 금지(대문자·따옴표·줄바꿈). 한국어 우선·한자 금지. (→ 응답 원칙)
+- 비밀: 자격증명·토큰·패스프레이즈·키워드 평문 채팅·git commit/push 금지.
+- commit: 결정가치 변경이면 [DECISION] 또는 본문 근거: 줄. (→ commit 시 [DECISION] 마커)
+<!-- GUARD-INDEX-END -->
 ## 응답 원칙
 
 - 한국어 우선. 한자 사용 금지.
