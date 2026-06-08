@@ -49,6 +49,19 @@ if [ -n "$LAST_ARCHIVED" ]; then
     parts+="3) 오래되지 않은(<7일) 결정·작업·미해결 작업이 있으면 progress.md 머리에 한두 줄 요약 추가\n\n"
 fi
 
+# [자동 트리거] CLAUDE.md @import 분리 검토 시점 자동 감지 (읽기전용).
+# 글로벌 가드 파일이 임계 이상이면 세션 시작 시 알림 주입. 본문 자동수정은 안 함.
+CLAUDEMD="$HOME/.claude/CLAUDE.md"
+CLAUDEMD_THRESHOLD=400
+if [ -f "$CLAUDEMD" ]; then
+    cmlines=$(wc -l < "$CLAUDEMD" 2>/dev/null || echo 0)
+    if [ "${cmlines:-0}" -ge "$CLAUDEMD_THRESHOLD" ] 2>/dev/null; then
+        parts+="## [자동 알림] CLAUDE.md @import 분리 검토 시점\n\n"
+        parts+="글로벌 CLAUDE.md 가 ${cmlines}줄(임계 ${CLAUDEMD_THRESHOLD}) 이상. 비-가드 섹션을 @import/rules 로 분리해 본문 축소 검토 권장.\n"
+        parts+="가드 줄 분리는 먼저 센티넬 1줄 테스트(@import 파일에 유니크 문자열→subagent/압축에서 보이는지, 모델턴 1회)로 확인 후에만. 무인 자동 본문 재배치 금지(추가만·바이트동일 검증·git revert 가능).\n\n"
+    fi
+fi
+
 [ -z "$parts" ] && exit 0
 
 # JSON 출력으로 additionalContext 주입
