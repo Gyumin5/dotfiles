@@ -258,7 +258,10 @@ if [ "$MACHINE_ID" = "raion" ] && [ -d "$DOTFILES_DIR/raion/todo-sync" ]; then
   # 운영경로에만 있고 git 제외(repo 의 bot/ 엔 .py 만 존재).
   mkdir -p "$TODO_DIR/bot"
   cp "$DOTFILES_DIR"/raion/todo-sync/bot/*.py "$TODO_DIR/bot/" 2>/dev/null || true
-  python3 -m pip install --user --quiet msal requests 2>/dev/null || true
+  # 웹UI(Tailscale 전용 폰 접속). 코드만 배포 — .token(secret)·로그는 런타임 생성(git 제외).
+  mkdir -p "$TODO_DIR/webui"
+  cp "$DOTFILES_DIR/raion/todo-sync/webui/server.py" "$TODO_DIR/webui/" 2>/dev/null || true
+  python3 -m pip install --user --quiet msal requests segno 2>/dev/null || true
   [ -f "$TODO_DIR/todo.db" ] || python3 "$TODO_DIR/todoctl.py" init 2>/dev/null || true
   [ -f "$TODO_DIR/last_check.txt" ] || date -u +%FT%TZ > "$TODO_DIR/last_check.txt"
   chmod 700 "$TODO_DIR"
