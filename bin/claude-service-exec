@@ -39,7 +39,7 @@ if effort == "mid":
     effort = "medium"
 if not re.fullmatch(r"[A-Za-z0-9._-]+", model or "x"):
     model = ""
-if effort not in ("low", "medium", "high"):
+if effort not in ("low", "medium", "high", "xhigh", "max"):
     effort = ""
 print(f"{model}\t{effort}")
 PYEOF

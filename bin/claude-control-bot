@@ -302,8 +302,8 @@ def project_key(workdir):
 # claude-service-exec 가 launch 시 읽어 --model/--effort 플래그로 적용.
 # 저장만 하고 자동 restart 안 함 (적용=해당 세션 Restart).
 MODELS_JSON = Path.home() / ".config" / "claude-models.json"
-MODEL_CHOICES = ["opus", "sonnet", "haiku"]
-EFFORT_CHOICES = ["low", "mid", "high"]  # mid 는 저장 시 medium 으로 매핑
+MODEL_CHOICES = ["opus", "sonnet", "haiku", "claude-fable-5"]
+EFFORT_CHOICES = ["low", "mid", "high", "xhigh", "max"]  # mid 는 저장 시 medium 으로 매핑 (CLI 지원: low/medium/high/xhigh/max)
 
 
 def load_models():
@@ -669,14 +669,14 @@ def handle_callback(cb):
             if not key:
                 continue
             entry = {"model": model}
-            if effort in ("low", "medium", "high"):
+            if effort in ("low", "medium", "high", "xhigh", "max"):
                 entry["effort"] = effort
             cfg[key] = entry
             saved.append(n)
         save_models(cfg)
         api("editMessageText", chat_id=chat_id, message_id=message_id,
             text=f"💾 저장됨: {', '.join(saved)} → {model}"
-                 + (f"/{effort}" if effort in ("low", "medium", "high") else "")
+                 + (f"/{effort}" if effort in ("low", "medium", "high", "xhigh", "max") else "")
                  + "\n적용하려면 해당 세션 Restart 필요.\n\n" + model_menu_text(),
             reply_markup=model_menu_markup())
     elif data == "menu:bypass":
