@@ -14,9 +14,16 @@ if ls "$proj_dir"/*.jsonl > /dev/null 2>&1; then
     has_jsonl=1
 fi
 
+# 모델 강제 핀 (옵트인): 유닛 Environment 에 CLAUDE_MODEL 있으면 --model 로 전달.
+# 구독(OAuth) 경로에선 settings model / ANTHROPIC_MODEL env 가 안 먹는 케이스 확인돼 CLI 플래그가 유일 확실. (2026-06-10)
+model_arg=""
+if [ -n "${CLAUDE_MODEL:-}" ]; then
+    model_arg=" --model ${CLAUDE_MODEL}"
+fi
+
 # exec script with pty (claude --remote-control requires tty)
 if [ "$has_jsonl" = "1" ]; then
-    exec script -q -c "claude -c --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null
+    exec script -q -c "claude -c${model_arg} --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null
 else
-    exec script -q -c "claude --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null
+    exec script -q -c "claude${model_arg} --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null
 fi
