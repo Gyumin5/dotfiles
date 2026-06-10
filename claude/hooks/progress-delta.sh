@@ -45,9 +45,9 @@ case "$TOOL" in
         ;;
 esac
 
-# 작은 hint 만 저장. 노이즈 큰 도구 (mcp__lean-ctx__*, ToolSearch) 는 카운트만.
+# 작은 hint 만 저장. 노이즈 큰 도구 (ToolSearch 등) 는 카운트만.
 case "$TOOL" in
-    mcp__lean-ctx__ctx_*|ToolSearch|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput)
+    ToolSearch|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput)
         hint=""
         ;;
 esac
