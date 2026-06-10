@@ -11,6 +11,7 @@ systemd user service로 상시 실행.
 """
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.request
@@ -99,7 +100,8 @@ def main_menu_markup():
          {"text": "💻 Resources", "callback_data": "resources"}],
         [{"text": "🚧 Bypass…", "callback_data": "menu:bypass"},
          {"text": "📜 Recent…", "callback_data": "menu:recent"}],
-        [{"text": "🔄 Restart…", "callback_data": "menu:restart"}],
+        [{"text": "🔄 Restart…", "callback_data": "menu:restart"},
+         {"text": "🧠 Model…", "callback_data": "menu:model"}],
     ]}
 
 
@@ -294,6 +296,77 @@ def service_workdir(name):
 def project_key(workdir):
     """cwd → ~/.claude/projects/<key> 변환 (/와 _ 를 -로). Claude Code 명명 규칙과 일치."""
     return workdir.replace("/", "-").replace("_", "-")
+
+
+# --- 세션별 모델/effort 설정 (~/.config/claude-models.json) ---
+# claude-service-exec 가 launch 시 읽어 --model/--effort 플래그로 적용.
+# 저장만 하고 자동 restart 안 함 (적용=해당 세션 Restart).
+MODELS_JSON = Path.home() / ".config" / "claude-models.json"
+MODEL_CHOICES = ["opus", "sonnet", "haiku"]
+EFFORT_CHOICES = ["low", "mid", "high"]  # mid 는 저장 시 medium 으로 매핑
+
+
+def load_models():
+    try:
+        d = json.loads(MODELS_JSON.read_text())
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_models(cfg):
+    MODELS_JSON.parent.mkdir(parents=True, exist_ok=True)
+    tmp = MODELS_JSON.with_name(MODELS_JSON.name + ".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+    tmp.replace(MODELS_JSON)
+
+
+def session_proj_key(name):
+    wd = service_workdir(name)
+    return project_key(wd) if wd else None
+
+
+def actual_model(name):
+    """최신 jsonl 끝 64KB에서 실제 사용 모델 추출 (가벼운 tail 스캔)"""
+    try:
+        wd = service_workdir(name)
+        if not wd:
+            return "?"
+        proj = Path.home() / ".claude" / "projects" / project_key(wd)
+        jsonls = sorted(proj.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not jsonls:
+            return "-"
+        size = jsonls[0].stat().st_size
+        with open(jsonls[0], "rb") as f:
+            f.seek(max(0, size - 65536))
+            tail = f.read().decode(errors="ignore")
+        ms = [m for m in re.findall(r'"model":"([^"]+)"', tail) if m != "<synthetic>"]
+        return ms[-1] if ms else "-"
+    except Exception:
+        return "?"
+
+
+def model_menu_text():
+    cfg = load_models()
+    lines = ["🧠 세션별 모델/effort", ""]
+    for name in list_sessions():
+        key = session_proj_key(name)
+        e = cfg.get(key, {}) if key else {}
+        setting = f"{e.get('model', '-')}/{e.get('effort', '-')}" if e else "(미설정)"
+        lines.append(f"{name}\n  실제: {actual_model(name)} | 설정: {setting}")
+    lines.append("")
+    lines.append("저장만 됨 — 적용하려면 해당 세션 Restart 필요.")
+    return "\n".join(lines)
+
+
+def model_menu_markup():
+    sessions = list_sessions()
+    rows = []
+    for i in range(0, len(sessions), 2):
+        rows.append([{"text": n, "callback_data": f"model_s:{n}"} for n in sessions[i:i + 2]])
+    rows.append([{"text": "🌐 전체 동시 설정", "callback_data": "model_s:*"}])
+    rows.append([{"text": "⬅ Back", "callback_data": "menu:main"}])
+    return {"inline_keyboard": rows}
 
 
 def read_recent(name, max_turns=6, max_chars=3000):
@@ -554,6 +627,58 @@ def handle_callback(cb):
     elif data == "menu:recent":
         api("editMessageText", chat_id=chat_id, message_id=message_id,
             text="최신 대화 볼 세션 선택:", reply_markup=session_menu_markup("recent"))
+    elif data == "menu:model":
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text=model_menu_text(), reply_markup=model_menu_markup())
+    elif data.startswith("model_s:"):
+        name = data[len("model_s:"):]
+        label = "모든 세션" if name == "*" else name
+        kb = [[{"text": m, "callback_data": f"model_m:{name}:{m}"} for m in MODEL_CHOICES]]
+        kb.append([{"text": "🧹 설정 제거 (기본 복귀)", "callback_data": f"model_m:{name}:__clear__"}])
+        kb.append([{"text": "⬅ Back", "callback_data": "menu:model"}])
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text=f"{label} — 모델 선택:", reply_markup={"inline_keyboard": kb})
+    elif data.startswith("model_m:"):
+        _, name, model = data.split(":", 2)
+        targets = list_sessions() if name == "*" else [name]
+        if model == "__clear__":
+            cfg = load_models()
+            for n in targets:
+                key = session_proj_key(n)
+                if key and key in cfg:
+                    del cfg[key]
+            save_models(cfg)
+            api("editMessageText", chat_id=chat_id, message_id=message_id,
+                text="🧹 설정 제거됨 (기본 복귀).\n\n" + model_menu_text(),
+                reply_markup=model_menu_markup())
+        else:
+            label = "모든 세션" if name == "*" else name
+            kb = [[{"text": e, "callback_data": f"model_e:{name}:{model}:{e}"} for e in EFFORT_CHOICES]]
+            kb.append([{"text": "effort 미설정", "callback_data": f"model_e:{name}:{model}:-"}])
+            kb.append([{"text": "⬅ Back", "callback_data": f"model_s:{name}"}])
+            api("editMessageText", chat_id=chat_id, message_id=message_id,
+                text=f"{label} — {model} 의 effort 선택:", reply_markup={"inline_keyboard": kb})
+    elif data.startswith("model_e:"):
+        _, name, model, effort = data.split(":", 3)
+        effort = {"mid": "medium"}.get(effort, effort)
+        targets = list_sessions() if name == "*" else [name]
+        cfg = load_models()
+        saved = []
+        for n in targets:
+            key = session_proj_key(n)
+            if not key:
+                continue
+            entry = {"model": model}
+            if effort in ("low", "medium", "high"):
+                entry["effort"] = effort
+            cfg[key] = entry
+            saved.append(n)
+        save_models(cfg)
+        api("editMessageText", chat_id=chat_id, message_id=message_id,
+            text=f"💾 저장됨: {', '.join(saved)} → {model}"
+                 + (f"/{effort}" if effort in ("low", "medium", "high") else "")
+                 + "\n적용하려면 해당 세션 Restart 필요.\n\n" + model_menu_text(),
+            reply_markup=model_menu_markup())
     elif data == "menu:bypass":
         api("editMessageText", chat_id=chat_id, message_id=message_id,
             text=bypass_menu_text(), reply_markup=bypass_menu_markup())

@@ -21,6 +21,39 @@ if [ -n "${CLAUDE_MODEL:-}" ]; then
     model_arg=" --model ${CLAUDE_MODEL}"
 fi
 
+# 세션별 모델/effort 설정 (~/.config/claude-models.json, 컨트롤봇 Model 메뉴가 기록).
+# { "<proj_key>": {"model": "...", "effort": "low|medium|high"} }
+# 우선순위: CLAUDE_MODEL env(유닛 명시 핀) > json. 설정 없거나 값 불량이면 기존 동작 그대로.
+MODELS_JSON="$HOME/.config/claude-models.json"
+if [ -f "$MODELS_JSON" ]; then
+    cfg=$(python3 - "$proj_key" "$MODELS_JSON" <<'PYEOF' 2>/dev/null
+import json, re, sys
+key, path = sys.argv[1], sys.argv[2]
+try:
+    entry = json.load(open(path)).get(key) or {}
+except Exception:
+    entry = {}
+model = entry.get("model") or ""
+effort = entry.get("effort") or ""
+if effort == "mid":
+    effort = "medium"
+if not re.fullmatch(r"[A-Za-z0-9._-]+", model or "x"):
+    model = ""
+if effort not in ("low", "medium", "high"):
+    effort = ""
+print(f"{model}\t{effort}")
+PYEOF
+)
+    json_model="${cfg%%$'\t'*}"
+    json_effort="${cfg#*$'\t'}"
+    if [ -z "$model_arg" ] && [ -n "$json_model" ]; then
+        model_arg=" --model ${json_model}"
+    fi
+    if [ -n "$json_effort" ]; then
+        model_arg="${model_arg} --effort ${json_effort}"
+    fi
+fi
+
 # exec script with pty (claude --remote-control requires tty)
 if [ "$has_jsonl" = "1" ]; then
     exec script -q -c "claude -c${model_arg} --remote-control --channels plugin:telegram@claude-plugins-official" /dev/null < /dev/null
