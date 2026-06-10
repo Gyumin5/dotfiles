@@ -1,0 +1,125 @@
+#!/bin/bash
+# claude-config-review: 분기별 설정 리뷰 리포트 (리포트 전용 — 어떤 설정도 수정하지 않음).
+# 목적: 인프라에 쌓인 낡은 것들을 분기마다 한 번 수집해 "정리 후보"로 사용자에게 알림.
+# 근거: ai-debate run-20260610T225112Z (d)안 채택 — 자동 변경 금지, 리포트+알림 1건만.
+# 실행: systemd timer (3/6/9/12월) 또는 수동. 출력: ~/.claude/state/config-review/YYYY-MM-DD.md
+
+set -uo pipefail
+
+OUTDIR="$HOME/.claude/state/config-review"
+mkdir -p "$OUTDIR"
+TODAY=$(date '+%Y-%m-%d')
+OUT="$OUTDIR/${TODAY}.md"
+HOST=$(hostname -s)
+
+{
+echo "# 설정 리뷰 리포트 ${TODAY} (${HOST})"
+echo "생성: $(date '+%Y-%m-%d %H:%M KST') | 리포트 전용 — 아무것도 수정하지 않음"
+echo
+
+echo "## 1. 미사용 capability (최근 90일 텔레메트리 대조)"
+if [ -x "$HOME/dotfiles/bin/claude-unused-capability-report" ]; then
+    "$HOME/dotfiles/bin/claude-unused-capability-report" --days 90 2>/dev/null || echo "(실행 실패)"
+else
+    echo "(claude-unused-capability-report 없음)"
+fi
+echo
+
+echo "## 2. CLAUDE.md 상태"
+CM="$HOME/.claude/CLAUDE.md"
+if [ -f "$CM" ]; then
+    lines=$(wc -l < "$CM")
+    echo "- 글로벌 CLAUDE.md: ${lines}줄 (@import 분리 임계 400줄)"
+    echo "- 사고 날짜 박힌 보정 지시 (낡음 후보 — 6개월 지난 건 검토):"
+    grep -noE '\(20[0-9]{2}-[0-9]{2}-[0-9]{2}[^)]*\)' "$CM" | head -15 | sed 's/^/  · line /'
+else
+    echo "(없음)"
+fi
+echo
+
+echo "## 3. 훅 인벤토리"
+echo "- ~/.claude/hooks/*.sh:"
+ls -1 "$HOME/.claude/hooks/"*.sh 2>/dev/null | sed 's|.*/|  · |'
+echo "- settings.json 훅 이벤트 수:"
+python3 -c "
+import json, os
+try:
+    d = json.load(open(os.path.expanduser('~/.claude/settings.json')))
+    for ev, hs in (d.get('hooks') or {}).items():
+        print(f'  · {ev}: {len(hs)}')
+except Exception as e:
+    print(f'  (읽기 실패: {e})')"
+echo
+
+echo "## 4. 최근 30일 가드 활동 (일하는지/노는지)"
+now=$(date +%s)
+echo "- rate-limit 차단 알림 플래그 (mtime 30일 내):"
+found=0
+for f in "$HOME"/.claude/state/rate-limit-alerted-*.flag; do
+    [ -f "$f" ] || continue
+    age=$(( (now - $(stat -c %Y "$f")) / 86400 ))
+    if [ "$age" -le 30 ]; then echo "  · $(basename "$f" .flag | sed 's/rate-limit-alerted-//') (${age}일 전)"; found=1; fi
+done
+[ "$found" = 0 ] && echo "  · 없음"
+echo "- bash-latency 누적 (30일 내 건수):"
+BL="$HOME/.claude/telemetry/bash-latency.jsonl"
+if [ -f "$BL" ]; then
+    cutoff=$(date -d '30 days ago' '+%Y-%m-%d')
+    cnt=$(awk -v c="$cutoff" -F'"ts":"' 'NF>1 {split($2,a,"\""); if (a[1] >= c) n++} END{print n+0}' "$BL")
+    echo "  · ${cnt}건"
+else
+    echo "  · 텔레메트리 없음"
+fi
+echo "- AI 호출 (30일 내, provider별):"
+AC="$HOME/.claude/telemetry/ai-calls.jsonl"
+if [ -f "$AC" ]; then
+    python3 - "$AC" <<'PYEOF'
+import json, sys
+from datetime import datetime, timedelta
+cutoff = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+counts = {}
+for l in open(sys.argv[1]):
+    try:
+        o = json.loads(l)
+        if str(o.get('ts', ''))[:10] >= cutoff:
+            counts[o.get('provider', '?')] = counts.get(o.get('provider', '?'), 0) + 1
+    except Exception:
+        pass
+print('\n'.join(f'  · {k}: {v}' for k, v in sorted(counts.items())) or '  · 없음')
+PYEOF
+else
+    echo "  · 텔레메트리 없음"
+fi
+echo
+
+echo "## 5. 머신 간 훅 drift (home vs raion, best-effort)"
+if ssh -o BatchMode=yes -o ConnectTimeout=6 raion 'ls -1 ~/.claude/hooks/*.sh 2>/dev/null | xargs -n1 basename' > /tmp/raion-hooks.txt 2>/dev/null; then
+    ls -1 "$HOME/.claude/hooks/"*.sh 2>/dev/null | xargs -n1 basename > /tmp/home-hooks.txt
+    d=$(diff /tmp/home-hooks.txt /tmp/raion-hooks.txt 2>/dev/null)
+    if [ -z "$d" ]; then echo "- 동일 (drift 없음)"; else echo "- 차이 발견:"; echo "$d" | sed 's/^/  /'; fi
+    rm -f /tmp/raion-hooks.txt /tmp/home-hooks.txt
+else
+    echo "- raion 접속 불가 (스킵)"
+fi
+echo
+echo "---"
+echo "처리 방법: 위 항목 중 정리할 것을 골라 수동으로 지시. 이 리포트는 아무것도 자동 변경하지 않음."
+} > "$OUT" 2>&1
+
+echo "리포트 생성: $OUT ($(wc -l < "$OUT")줄)"
+
+# 텔레그램 알림 1건 (dotfiles 봇, best-effort — 실패해도 리포트는 남음)
+ENV_FILE="$HOME/dotfiles/.claude/telegram/.env"
+if [ -f "$ENV_FILE" ] && [ "${CONFIG_REVIEW_NO_NOTIFY:-0}" != "1" ]; then
+    . "$ENV_FILE"
+    if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+        head60=$(head -c 3000 "$OUT")
+        curl -s -m 10 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=8689118207" \
+            --data-urlencode "text=[분기 설정 리뷰] ${TODAY} (${HOST}) 리포트 생성됨.
+경로: ${OUT}
+요약(앞부분):
+${head60}" >/dev/null 2>&1 && echo "텔레그램 알림 발송" || echo "알림 실패(리포트는 보존)"
+    fi
+fi
+exit 0
