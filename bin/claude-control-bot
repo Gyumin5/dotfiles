@@ -302,7 +302,8 @@ def project_key(workdir):
 # claude-service-exec 가 launch 시 읽어 --model/--effort 플래그로 적용.
 # 저장만 하고 자동 restart 안 함 (적용=해당 세션 Restart).
 MODELS_JSON = Path.home() / ".config" / "claude-models.json"
-MODEL_CHOICES = ["opus", "sonnet", "haiku", "claude-fable-5"]
+MODEL_CHOICES = [("Opus 4.8", "claude-opus-4-8"), ("Sonnet 4.6", "claude-sonnet-4-6"),
+                 ("Haiku 4.5", "claude-haiku-4-5-20251001"), ("Fable 5", "claude-fable-5")]
 EFFORT_CHOICES = ["low", "mid", "high", "xhigh", "max"]  # mid 는 저장 시 medium 으로 매핑 (CLI 지원: low/medium/high/xhigh/max)
 
 
@@ -327,7 +328,19 @@ def session_proj_key(name):
 
 
 def actual_model(name):
-    """최신 jsonl 끝 64KB에서 실제 사용 모델 추출 (가벼운 tail 스캔)"""
+    """실행 중 프로세스의 --model 플래그 우선(실시간), 없으면 jsonl tail (재시작 직후 stale 가능)."""
+    try:
+        pid = subprocess.check_output(
+            ["systemctl", "--user", "show", f"claude-{name}.service", "-p", "MainPID", "--value"],
+            text=True, timeout=3,
+        ).strip()
+        if pid and pid != "0":
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="ignore").replace("\0", " ")
+            m = re.search(r"--model\s+(\S+)", cmd)
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
     try:
         wd = service_workdir(name)
         if not wd:
@@ -633,7 +646,7 @@ def handle_callback(cb):
     elif data.startswith("model_s:"):
         name = data[len("model_s:"):]
         label = "모든 세션" if name == "*" else name
-        kb = [[{"text": m, "callback_data": f"model_m:{name}:{m}"} for m in MODEL_CHOICES]]
+        kb = [[{"text": lbl, "callback_data": f"model_m:{name}:{val}"}] for lbl, val in MODEL_CHOICES]
         kb.append([{"text": "🧹 설정 제거 (기본 복귀)", "callback_data": f"model_m:{name}:__clear__"}])
         kb.append([{"text": "⬅ Back", "callback_data": "menu:model"}])
         api("editMessageText", chat_id=chat_id, message_id=message_id,
@@ -674,11 +687,19 @@ def handle_callback(cb):
             cfg[key] = entry
             saved.append(n)
         save_models(cfg)
+        if name == "*":
+            restart_cb = "confirm:restart-all"
+        else:
+            restart_cb = f"restart:{name}"
+        kb = {"inline_keyboard": [
+            [{"text": "🔄 지금 Restart (적용)", "callback_data": restart_cb},
+             {"text": "⏸ 나중에", "callback_data": "menu:model"}],
+        ]}
         api("editMessageText", chat_id=chat_id, message_id=message_id,
             text=f"💾 저장됨: {', '.join(saved)} → {model}"
                  + (f"/{effort}" if effort in ("low", "medium", "high", "xhigh", "max") else "")
-                 + "\n적용하려면 해당 세션 Restart 필요.\n\n" + model_menu_text(),
-            reply_markup=model_menu_markup())
+                 + "\n지금 재시작해서 적용할까?",
+            reply_markup=kb)
     elif data == "menu:bypass":
         api("editMessageText", chat_id=chat_id, message_id=message_id,
             text=bypass_menu_text(), reply_markup=bypass_menu_markup())
