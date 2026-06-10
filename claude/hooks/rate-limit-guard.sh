@@ -37,14 +37,29 @@ try:
   print(d.get("cwd") or "")
 except: print("")' 2>/dev/null)
 [ -z "$CWD" ] && CWD="$PWD"
-# 세션 키 결정: 1) env, 2) cgroup으로 systemd unit 추적, 3) cwd basename
+# 세션 키 결정: 1) env, 2) cgroup으로 systemd unit 추적, 3) cwd 상향 탐색, 4) cwd basename
+# 상향 탐색: 실험 작업트리(예: .../bias/bridge01)에서 실행된 프로세스도 부모 프로젝트로 귀속.
+# (2026-06-10 bridge01 오귀속 — cwd basename 이 세션명으로 잡혀 fallback 봇으로 알림 간 사고 후 추가)
 PROJ="${CLAUDE_SESSION_NAME:-}"
 if [ -z "$PROJ" ]; then
     PROJ=$(grep -oE 'claude-[^/]+\.service' /proc/self/cgroup 2>/dev/null | head -1 | sed 's/^claude-//; s/\.service$//')
 fi
+ANCHOR_DIR=""
+_d="$CWD"
+while [ -n "$_d" ] && [ "$_d" != "/" ] && [ "$_d" != "$HOME" ]; do
+    if [ -f "$_d/.claude/telegram/.env" ]; then ANCHOR_DIR="$_d"; break; fi
+    _d=$(dirname "$_d")
+done
+if [ -z "$PROJ" ] && [ -n "$ANCHOR_DIR" ]; then
+    PROJ=$(basename "$ANCHOR_DIR" | tr '_' '-')
+fi
 [ -z "$PROJ" ] && PROJ=$(basename "$CWD")
 ALERT_FLAG="${ALERT_FLAG_PREFIX}-${PROJ}.flag"
 PROJECT_TELEGRAM_ENV="${CWD}/.claude/telegram/.env"
+if [ ! -f "$PROJECT_TELEGRAM_ENV" ] && [ -n "$ANCHOR_DIR" ]; then
+    # cwd 자체엔 봇 설정이 없어도 상위 프로젝트 봇으로 라우팅
+    PROJECT_TELEGRAM_ENV="$ANCHOR_DIR/.claude/telegram/.env"
+fi
 if [ ! -f "$PROJECT_TELEGRAM_ENV" ] && [ -n "$PROJ" ]; then
     # CWD가 빈/잘못된 경로일 수 있어 systemd WorkingDirectory로 재시도
     SD_WD=$(systemctl --user show "claude-${PROJ}.service" -p WorkingDirectory 2>/dev/null | sed 's/^WorkingDirectory=//')
