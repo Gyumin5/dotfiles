@@ -15,32 +15,6 @@
       "WebSearch",
       "NotebookEdit",
       "Skill",
-      "mcp__lean-ctx__ctx_read",
-      "mcp__lean-ctx__ctx_shell",
-      "mcp__lean-ctx__ctx_search",
-      "mcp__lean-ctx__ctx_tree",
-      "mcp__lean-ctx__ctx_smart_read",
-      "mcp__lean-ctx__ctx_multi_read",
-      "mcp__lean-ctx__ctx_overview",
-      "mcp__lean-ctx__ctx_context",
-      "mcp__lean-ctx__ctx_session",
-      "mcp__lean-ctx__ctx_knowledge",
-      "mcp__lean-ctx__ctx_discover",
-      "mcp__lean-ctx__ctx_graph",
-      "mcp__lean-ctx__ctx_metrics",
-      "mcp__lean-ctx__ctx_compress",
-      "mcp__lean-ctx__ctx_delta",
-      "mcp__lean-ctx__ctx_dedup",
-      "mcp__lean-ctx__ctx_fill",
-      "mcp__lean-ctx__ctx_cache",
-      "mcp__lean-ctx__ctx_preload",
-      "mcp__lean-ctx__ctx_analyze",
-      "mcp__lean-ctx__ctx_benchmark",
-      "mcp__lean-ctx__ctx_intent",
-      "mcp__lean-ctx__ctx_semantic_search",
-      "mcp__lean-ctx__ctx_response",
-      "mcp__lean-ctx__ctx_agent",
-      "mcp__lean-ctx__ctx_wrapped",
       "mcp__plugin_telegram_telegram__reply",
       "mcp__plugin_telegram_telegram__react",
       "mcp__plugin_telegram_telegram__edit_message",
@@ -117,10 +91,6 @@
       {
         "matcher": "Bash|bash",
         "hooks": [
-          {
-            "type": "command",
-            "command": "/home/gmoh/.claude/hooks/lean-ctx-rewrite.sh"
-          },
           {
             "type": "command",
             "command": "/home/gmoh/.claude/hooks/block-ai-after-compact.sh"
