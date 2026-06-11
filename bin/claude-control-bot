@@ -168,8 +168,9 @@ def read_resources():
         names = list_sessions()
         active = failed = bun_missing = 0
         rss_list = []
+        hp = sessions_health_parallel(names)
         for n in names:
-            ok, bun = session_health(n)
+            ok, bun = hp[n]
             if ok: active += 1
             else: failed += 1
             if ok and not bun: bun_missing += 1
@@ -479,8 +480,10 @@ def read_statusline():
         ]
 
         health_lines = ["", "세션 / 텔레그램봇:"]
-        for name in list_sessions():
-            s_ok, bot_ok = session_health(name)
+        names = list_sessions()
+        hp = sessions_health_parallel(names)
+        for name in names:
+            s_ok, bot_ok = hp[name]
             s_icon = "🟢" if s_ok else "🔴"
             bot_icon = "🟢" if bot_ok else ("⚪" if s_ok else "🔴")
             health_lines.append(f"{s_icon} {name}  bot:{bot_icon}")
@@ -557,6 +560,14 @@ def session_health(name):
         # 소량 transient(막 도착, 폴링 직전)은 허용, 누적은 비정상
         telegram_ok = pending < 3
     return active, telegram_ok
+
+
+def sessions_health_parallel(names):
+    """session_health 를 병렬 실행 (세션당 getWebhookInfo HTTP가 직렬이면 9세션 ~8s → 병렬 ~1s)."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        results = list(ex.map(session_health, names))
+    return dict(zip(names, results))
 
 
 def session_menu_markup(action):
