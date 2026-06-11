@@ -1,13 +1,33 @@
 # raion 업무 todo 자동화 — RUNBOOK (재구성·운영 절차)
 
 목적: 포맷/재설치/세션 재시작 후에도 이 문서 + install.sh 만으로 todo 자동화를 복원·운영한다.
-가드: 이 시스템은 Tailscale 노드명이 "raion"인 머신에서만 동작/설치한다.
+가드: 이 시스템은 machine-id 마커(~/.config/claude-machine-id = "raion")인 머신에서만 설치/기동한다.
+
+## 경로 계약 (확정 — 2026-06-11)
+- 코드 source of truth: dotfiles repo `raion/todo-sync/` (home 이 commit/push, raion 은 pull-only).
+- 런타임 데이터 경로: `~/raion/todo-sync` (확정 — ~/.local/share/todo 미채택, 기존 운영 데이터 무이동).
+  install.sh 가 repo 코드를 이 경로로 복사 배포(cp -f). 데이터·비밀은 절대 안 덮어씀.
+- 데이터·비밀(전부 repo 제외, gitignore): todo.db(+wal/shm), todo.md, last_check.txt, state.json,
+  token_cache.json, bot.token, bot.chat_id, bot/snooze.json, webui/.token, config.json(실파일).
+- config.json: repo 엔 `config.json.example`(client/tenant placeholder + tags 통제어휘)만.
+  실파일은 raion 로컬 — install.sh 는 없을 때만 example 로 생성(이후 절대 안 덮어씀).
+- systemd 유닛(todobot-digest.service/.timer, todobot-listener.service): repo `systemd/user/`.
+  %h 경로 + `ConditionPathExists=%h/raion/todo-sync/bot.token` (타 머신 오기동 방어).
+  install.sh 가 MACHINE_ID=raion 일 때만 ~/.config/systemd/user 에 복사·enable. home 엔 유닛 미배포.
+
+## raion 후속 절차 (dotfiles 편입 전환, 1회 — 사람 확인하에)
+1. `cd ~/dotfiles && git pull --ff-only`
+2. `bash install.sh` — todobot 유닛 %h 버전 재배치 + daemon-reload, repo 코드 → ~/raion/todo-sync 덮어씀.
+   기존 bot.token/bot.chat_id/todo.db/config.json 은 그대로 연결됨(데이터 무이동).
+3. `systemctl --user restart todobot-listener.service` (새 유닛 정의 반영), `systemctl --user list-timers | grep todobot` 확인.
+4. 검증: 텔레그램 TODOBot "목록" 응답, `python3 ~/raion/todo-sync/todoctl.py list` 정상.
+5. 구경로 잔재 없음(데이터 경로 동일) — 별도 정리 불필요. 구 유닛 정의는 2의 덮어쓰기로 대체됨.
 
 ## 구성요소
 - 진실원본: SQLite `todo.db` (WAL). 단일 writer = `todoctl.py`. 직접 편집 금지.
 - 사람이 읽는 뷰: `todo.md` (todoctl 변경 시 자동 export).
 - 자동정리: 살아있는 Claude(이 텔레그램 세션)의 CronCreate 2개.
-  - 증분: cron `8 * * * *` (24/7 매시간), prompt = `prompts/incremental.txt`
+  - 증분: cron `4,14,24,34,44,54 * * * *` (10분 주기), prompt = `prompts/incremental.txt`
   - 브리핑: cron `1 9 * * 1-5` (평일 09:00), prompt = `prompts/briefing.txt`
   - chat_id 8689118207.
 - guardian: cron `30 6 * * *` (매일) — 위 2개+자기자신을 멱등 재생성해 7일 만료 시계 갱신 + `state.json` 갱신. prompt = `prompts/guardian.txt`
@@ -37,7 +57,7 @@
 
 ## 안전/보안
 - token_cache.json(런타임 생성)·todo.db·last_check.txt·state.json 은 repo에 넣지 않음(런타임/비밀).
-- config.json의 client/tenant ID는 식별자(비밀 아님).
+- config.json의 client/tenant ID는 식별자(비밀 아님)지만 실파일은 repo 제외 — repo 엔 .example 템플릿만(2026-06-11).
 - 토큰류는 권한 600, ~/raion/todo-sync(700) 내 보관.
 
 ## 사용자 승인 기록

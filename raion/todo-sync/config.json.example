@@ -1,6 +1,6 @@
 {
-  "client_id": "2ea12322-9dbb-4e74-9cb2-d1b761d98f74",
-  "tenant_id": "eab48fb7-a87a-4251-87d7-be4c26161e90",
+  "client_id": "<AZURE_APP_CLIENT_ID>",
+  "tenant_id": "<AZURE_TENANT_ID>",
   "scopes": "offline_access User.Read Mail.Read Tasks.ReadWrite Chat.Read",
   "tags": ["긴급", "중요", "개발", "회사", "인사", "회의", "개인", "기타"],
   "tag_aliases": {

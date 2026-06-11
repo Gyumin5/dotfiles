@@ -1,11 +1,13 @@
 [Unit]
 Description=TODOBot 리스너 (명령/완료·스누즈 버튼 long-poll)
 After=network-online.target
+# raion 전용 — 봇 토큰이 있는 머신에서만 기동 (다른 머신 오기동 2중 방어)
+ConditionPathExists=%h/raion/todo-sync/bot.token
 
 [Service]
 Type=simple
-WorkingDirectory=/home/gmoh/raion/todo-sync/bot
-ExecStart=/usr/bin/python3 /home/gmoh/raion/todo-sync/bot/listener.py
+WorkingDirectory=%h/raion/todo-sync/bot
+ExecStart=/usr/bin/python3 %h/raion/todo-sync/bot/listener.py
 Restart=always
 RestartSec=3
 

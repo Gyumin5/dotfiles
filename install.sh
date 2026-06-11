@@ -195,30 +195,33 @@ fi
 # 세션 enable 은 machines/<machine>.list 에 적힌 것만. 추가 가드: 그 세션 토큰
 # (.claude/telegram/.env)이 이 머신에 실제 있을 때만 enable → 잘못된 머신에서
 # 같은 봇 2중 inbound 사고 방지. (unit 자체에도 ConditionPathExists 로 2중 방어.)
+# 머신 식별 (unit 복사 전에 필요 — raion 전용 todobot 유닛 필터)
+MACHINE_ID=""
+MARKER="$HOME/.config/claude-machine-id"
+if [ -f "$MARKER" ]; then
+  MACHINE_ID=$(tr -d '[:space:]' < "$MARKER")
+elif command -v tailscale >/dev/null 2>&1; then
+  TS_NAME=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["Self"]["HostName"])
+except: pass' 2>/dev/null)
+  if [ -n "$TS_NAME" ] && [ -f "$DOTFILES_DIR/machines/${TS_NAME}.list" ]; then
+    MACHINE_ID="$TS_NAME"
+    echo "machine-id 마커 없음 → tailscale 노드명 '$TS_NAME' 사용. 고정하려면: echo $TS_NAME > $MARKER"
+  fi
+fi
+
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 if [ -d "$DOTFILES_DIR/systemd/user" ]; then
   mkdir -p "$SYSTEMD_USER_DIR"
   for f in "$DOTFILES_DIR"/systemd/user/*.service "$DOTFILES_DIR"/systemd/user/*.timer; do
     [ -f "$f" ] || continue
-    cp -f "$f" "$SYSTEMD_USER_DIR/$(basename "$f")"
+    base=$(basename "$f")
+    # raion 전용 todobot 유닛은 raion 에만 배포 (다른 머신엔 유닛 자체를 안 심음).
+    case "$base" in todobot-*) [ "$MACHINE_ID" = "raion" ] || continue;; esac
+    cp -f "$f" "$SYSTEMD_USER_DIR/$base"
   done
   systemctl --user daemon-reload 2>/dev/null || true
   echo "Synced systemd units to $SYSTEMD_USER_DIR"
-
-  # 머신 식별
-  MACHINE_ID=""
-  MARKER="$HOME/.config/claude-machine-id"
-  if [ -f "$MARKER" ]; then
-    MACHINE_ID=$(tr -d '[:space:]' < "$MARKER")
-  elif command -v tailscale >/dev/null 2>&1; then
-    TS_NAME=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys
-try: print(json.load(sys.stdin)["Self"]["HostName"])
-except: pass' 2>/dev/null)
-    if [ -n "$TS_NAME" ] && [ -f "$DOTFILES_DIR/machines/${TS_NAME}.list" ]; then
-      MACHINE_ID="$TS_NAME"
-      echo "machine-id 마커 없음 → tailscale 노드명 '$TS_NAME' 사용. 고정하려면: echo $TS_NAME > $MARKER"
-    fi
-  fi
 
   MANIFEST="$DOTFILES_DIR/machines/${MACHINE_ID}.list"
   if [ -n "$MACHINE_ID" ] && [ -f "$MANIFEST" ]; then
@@ -242,15 +245,21 @@ except: pass' 2>/dev/null)
   fi
 fi
 
-# raion 전용 todo 자동화 자산 설치 (MACHINE_ID=raion 일 때만). 멱등(cp -n, [ -f ] 가드).
+# raion 전용 todo 자동화 자산 설치 (MACHINE_ID=raion 일 때만).
 # 범위: 파일자산 + 의존성 + DB init 만. SessionStart 훅/settings/persistence/cron 은 제외
 # (cron 무장은 raion 의 살아있는 텔레그램 세션이 별도로 함). raion-todo-arm.sh 도 범위 외.
+# 코드(.py/프롬프트/RUNBOOK)=repo 가 source of truth → 항상 덮어씀(cp -f).
+# 데이터·비밀(todo.db, bot.token, config.json, last_check.txt …)=raion 로컬 → 절대 안 덮어씀.
 if [ "$MACHINE_ID" = "raion" ] && [ -d "$DOTFILES_DIR/raion/todo-sync" ]; then
   TODO_DIR="$HOME/raion/todo-sync"
   mkdir -p "$TODO_DIR/prompts"
-  cp -n "$DOTFILES_DIR/raion/todo-sync/todoctl.py"  "$TODO_DIR/"
-  cp -n "$DOTFILES_DIR/raion/todo-sync/auth.py"     "$TODO_DIR/"
-  cp -n "$DOTFILES_DIR/raion/todo-sync/config.json" "$TODO_DIR/"
+  cp -f "$DOTFILES_DIR/raion/todo-sync/todoctl.py"  "$TODO_DIR/"
+  cp -f "$DOTFILES_DIR/raion/todo-sync/auth.py"     "$TODO_DIR/"
+  # config.json 은 raion 로컬(식별자 포함, repo 엔 .example 만). 없을 때만 템플릿 생성.
+  if [ ! -f "$TODO_DIR/config.json" ]; then
+    cp "$DOTFILES_DIR/raion/todo-sync/config.json.example" "$TODO_DIR/config.json"
+    echo "[install]   config.json 템플릿 생성 — client_id/tenant_id 채워야 메일·Graph 수집 동작"
+  fi
   cp    "$DOTFILES_DIR/raion/todo-sync/RUNBOOK.md"  "$TODO_DIR/" 2>/dev/null || true
   cp    "$DOTFILES_DIR"/raion/todo-sync/prompts/*.txt "$TODO_DIR/prompts/" 2>/dev/null || true
   # TODOBot 코드(전용 텔레그램 봇: 마감 리마인더 + 완료/스누즈/일정조정 리스너).

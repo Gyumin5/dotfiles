@@ -17,6 +17,8 @@ __pycache__/
 /raion/todo-sync/last_check.txt
 /raion/todo-sync/state.json
 /raion/todo-sync/token_cache.json
+# config.json 실파일은 raion 로컬 (client_id/tenant_id — 템플릿은 config.json.example)
+/raion/todo-sync/config.json
 # 봇/웹UI 비밀·상태 (secret·런타임)
 /raion/todo-sync/bot.token
 /raion/todo-sync/bot.chat_id

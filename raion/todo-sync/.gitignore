@@ -4,6 +4,11 @@ bot.chat_id
 bot/snooze.json
 bot/__pycache__/
 __pycache__/
+config.json
+token_cache.json
+state.json
+webui/.token
+webui/*.log
 # 운영 DB·뷰·체크포인트 (operational only)
 todo.db
 todo.db-wal

@@ -1,8 +1,10 @@
 [Unit]
 Description=TODOBot 마감 리마인더 발송 (oneshot)
 After=network-online.target
+# raion 전용 — 봇 토큰이 있는 머신에서만 기동 (다른 머신 오기동 2중 방어)
+ConditionPathExists=%h/raion/todo-sync/bot.token
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/gmoh/raion/todo-sync/bot
-ExecStart=/usr/bin/python3 /home/gmoh/raion/todo-sync/bot/notify.py
+WorkingDirectory=%h/raion/todo-sync/bot
+ExecStart=/usr/bin/python3 %h/raion/todo-sync/bot/notify.py

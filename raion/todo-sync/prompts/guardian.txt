@@ -3,7 +3,7 @@
 목적: CronCreate 7일 만료를 막고 상태파일을 갱신.
 1) CronList 확인.
 2) 다음 3개를 멱등 재무장(있으면 CronDelete 후 재생성해 7일 시계 갱신; 프롬프트 본문은 해당 파일 내용 그대로):
-   - 증분: cron "8 * * * *", recurring=true, durable=true, prompt=~/raion/todo-sync/prompts/incremental.txt
+   - 증분: cron "4,14,24,34,44,54 * * * *"(10분 주기), recurring=true, durable=true, prompt=~/raion/todo-sync/prompts/incremental.txt
    - 브리핑: cron "1 9 * * 1-5", recurring=true, durable=true, prompt=~/raion/todo-sync/prompts/briefing.txt
    - guardian(자기자신): cron "30 6 * * *", recurring=true, durable=true, prompt=~/raion/todo-sync/prompts/guardian.txt
 3) 상태파일 갱신: python3로 ~/raion/todo-sync/state.json 의 updated/session_heartbeat/last_cron_rearm 를 현재 KST로, cron_next_expiry 를 (지금+7일) KST로 기록.

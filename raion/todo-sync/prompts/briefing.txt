@@ -1,5 +1,5 @@
 [아침 브리핑 — 평일 09:00] 사용자 메시지 없어도 즉시 수행. 자동 트리거.
 
-1) 증분 점검: `cat /home/gmoh/raion/todo-sync/last_check.txt` 이후 신규를 (a)메일 outlook_email_search afterDateTime (b)Teams DM chat_message_search query "*" afterDateTime (c)채널 게시글 chat_message_search query "*" limit 25 날짜필터없이→channelUri & createdDateTime>last_check 만 클라이언트 필터. 식대카드·봇로그·단순알림 제외. Sent Items·`todoctl.py json --all` 대조 중복/회신완료 제외. 명확한 신규만 `todoctl.py add`. 그 후 `date -u +%FT%TZ > /home/gmoh/raion/todo-sync/last_check.txt`.
+1) 증분 점검: `cat /home/gmoh/raion/todo-sync/last_check.txt` 이후 신규를 (a)메일 outlook_email_search afterDateTime (b)Teams DM chat_message_search query "*" afterDateTime (c)채널 게시글 chat_message_search query "*" limit 25 날짜필터없이→channelUri & createdDateTime>last_check 만 클라이언트 필터. 식대카드·봇로그·단순알림 제외. Sent Items·`todoctl.py json --all` 대조 중복/회신완료 제외. Teams 회신요청 후보는 그 chatId 에서 chat_message_search(sender "gmoh@raionrobotics.com") 로 요청 이후 gmoh 발신을 찾아 내용까지 읽고 분류: 확정 해결이면 제외, 보류·조건부("생각해볼게요" 등)면 미해결로 보고 후속 todo 유지/생성, 미회신이면 정상 후보. 명확한 신규만 `todoctl.py add`. 그 후 `date -u +%FT%TZ > /home/gmoh/raion/todo-sync/last_check.txt`.
 2) `python3 /home/gmoh/raion/todo-sync/todoctl.py list` 로 현재 미완료 전체.
 3) mcp__plugin_telegram_telegram__reply(chat_id 8689118207)로 한국어 아침 브리핑: (a)밤사이 신규(있으면) (b)오늘/임박 기한 강조 (c)현재 미완료 전체 목록. 새 항목 없어도 전체 목록은 항상 발송.
