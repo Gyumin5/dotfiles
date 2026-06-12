@@ -216,8 +216,8 @@ if [ -d "$DOTFILES_DIR/systemd/user" ]; then
   for f in "$DOTFILES_DIR"/systemd/user/*.service "$DOTFILES_DIR"/systemd/user/*.timer; do
     [ -f "$f" ] || continue
     base=$(basename "$f")
-    # raion 전용 todobot 유닛은 raion 에만 배포 (다른 머신엔 유닛 자체를 안 심음).
-    case "$base" in todobot-*) [ "$MACHINE_ID" = "raion" ] || continue;; esac
+    # raion 전용 유닛(todobot, self-auth-watch)은 raion 에만 배포 (다른 머신엔 유닛 자체를 안 심음).
+    case "$base" in todobot-*|raion-auth-watch.*) [ "$MACHINE_ID" = "raion" ] || continue;; esac
     cp -f "$f" "$SYSTEMD_USER_DIR/$base"
   done
   systemctl --user daemon-reload 2>/dev/null || true
@@ -288,6 +288,14 @@ if [ "$MACHINE_ID" = "raion" ] && [ -d "$DOTFILES_DIR/raion/todo-sync" ]; then
   else
     echo "[install]   TODOBot 토큰 없음 → 리스너/타이머 enable 생략. BotFather 토큰 저장 후 재실행."
   fi
+
+  # self-auth-watch: claude.ai 로그인 만료를 raion 스스로 감지 → todobot 으로 알림.
+  # 알림 경로가 봇 토큰 curl 이라 claude 인증이 죽어도 동작. 유닛은 위 systemd 블록에서 배포됨.
+  ln -sf "$DOTFILES_DIR/bin/raion-claude-auth-watch" ~/.local/bin/raion-claude-auth-watch
+  chmod +x "$DOTFILES_DIR/bin/raion-claude-auth-watch"
+  systemctl --user enable --now raion-auth-watch.timer 2>/dev/null \
+    && echo "[install]   enabled raion-auth-watch.timer" \
+    || echo "[install]   WARN: raion-auth-watch.timer enable 실패"
 fi
 
 # 비밀 복원 (봇토큰/유저봇/컨트롤봇).

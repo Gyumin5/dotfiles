@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# raion claude.ai 로그인 self-health probe.
+# 헤드리스 ping 으로 raion 자기 로그인 유효성 확인 → 만료/실패면 todobot 으로 gmoh 에게 1회 알림.
+# 인터랙티브 세션이 죽어도 systemd --user 타이머라 독립 실행됨.
+# 알림은 todobot 봇 토큰 curl 이라 claude.ai 인증 끊겨도 동작함.
+set -u
+
+EMPTY=/tmp/raion-empty-mcp.json
+echo '{"mcpServers":{}}' > "$EMPTY"
+
+STATE="$HOME/.cache/raion-claude-auth-watch.state"   # "down" 저장 = 이미 알림 보냄
+mkdir -p "$(dirname "$STATE")"
+
+TOKEN_FILE="$HOME/raion/todo-sync/bot.token"
+CHATID_FILE="$HOME/raion/todo-sync/bot.chat_id"
+
+probe() {
+  # 자식 claude 는 반드시 strict-mcp-config + 빈 mcp (부모 MCP 충돌 방지 규칙)
+  timeout 90 claude --strict-mcp-config --mcp-config "$EMPTY" -p "ping" >/dev/null 2>&1
+  return $?
+}
+
+# 1차 실패 시 일시 네트워크 블립 배제 위해 12초 후 재시도
+probe
+RC=$?
+if [ "$RC" -ne 0 ]; then
+  sleep 12
+  probe
+  RC=$?
+fi
+
+PREV=""
+[ -f "$STATE" ] && PREV=$(cat "$STATE")
+
+notify() {
+  [ -f "$TOKEN_FILE" ] || return 0
+  [ -f "$CHATID_FILE" ] || return 0
+  local tok cid
+  tok=$(cat "$TOKEN_FILE")
+  cid=$(cat "$CHATID_FILE")
+  curl -s -m 8 -X POST "https://api.telegram.org/bot${tok}/sendMessage" \
+    --data-urlencode "chat_id=${cid}" \
+    --data-urlencode "text=$1" >/dev/null 2>&1 || true
+}
+
+if [ "$RC" -ne 0 ]; then
+  # 로그인 죽음. 직전에 안 보냈으면 1회만 알림 (스팸 방지)
+  if [ "$PREV" != "down" ]; then
+    notify "[raion health] claude.ai 로그인 만료/인증 실패 감지 (rc=$RC). raion 재로그인 필요 — claude /login. 증분정리·검색 세션 멈췄을 수 있음."
+    echo down > "$STATE"
+  fi
+else
+  # 정상. 직전이 down 이었으면 복구 알림 1회
+  if [ "$PREV" = "down" ]; then
+    notify "[raion health] claude.ai 로그인 복구됨. raion 정상."
+  fi
+  rm -f "$STATE"
+fi

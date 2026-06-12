@@ -1,0 +1,10 @@
+[Unit]
+Description=Raion claude.ai self-auth health probe timer (부팅 5분 후 + 30분 주기)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
