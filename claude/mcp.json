@@ -7,11 +7,11 @@
         "cd ~/.local/share/mcp/arxiv-latex-mcp && uv run server/main.py"
       ]
     },
-    "academic-search": {
+    "paper-search": {
       "command": "bash",
       "args": [
         "-c",
-        "cd ~/.local/share/mcp/academic-search-mcp && uv run server.py"
+        "cd ~/.local/share/mcp/paper-search-mcp && uv run python -m paper_search_mcp.server"
       ]
     }
   }
